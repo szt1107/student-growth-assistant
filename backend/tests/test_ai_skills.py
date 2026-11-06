@@ -36,6 +36,8 @@ from app.workspace_schemas import ToolPlan
     ('帮我看看今天任务','query',('query',)),
     ('你还记得我的学习习惯吗','query',('query',)),
     ('今天有点累','chat',('chat',)),
+    ('请详细说明动态规划的状态定义、转移、初始化和复杂度，并给一个完整例子。','chat',('chat',)),
+    ('请帮我安排明天学习动态规划作业','schedule',('task','schedule')),
     ('我有一个长期学习目标，最近有点迷茫','chat',('chat',)),
     ('讨论学习方向，我暂时不想创建任务','chat',('chat',)),
     ('先不要帮我安排','chat',('chat',)),
@@ -67,11 +69,17 @@ def test_short_answer_inherits_only_unresolved_user_intent():
     '把当前草案改为20:00开始，持续90分钟',
     '我今天晚上要完成操作系统作业，请更新已有草案，截止今晚22点',
     '请修改这份草案，分成两段，每段45分钟',
+    '把当前日程草案的真实截止时间设为明天晚上22:00',
+    '把当前日程草案的截止时间设置为明天晚上22:00',
 ])
 def test_explicit_draft_followup_uses_actual_pending_kind(text):
     pending=[{'kind':'planning','id':1,'version':'v1','status':'needs_input'}]
     assert ai_skills.select_skills(text,current_drafts=pending).expected=='planning'
-    for negative in ['先不要更新当前草案','如果把当前草案改为八点会怎样','他说“更新当前草案”是什么意思']:
+    for negative in ['先不要更新当前草案','如果把当前草案改为八点会怎样','他说“更新当前草案”是什么意思',
+                     '不要把当前日程草案的截止时间设为明天晚上22:00',
+                     '我想知道，如果把当前日程草案的截止时间设为明天晚上22:00，会不会与课程冲突？',
+                     '请分析，假设把当前日程草案的截止时间设置为明天晚上22:00，是否会影响休息？',
+                     '如果把当前日程草案的截止时间设置为明天晚上22:00会怎样']:
         assert ai_skills.select_skills(negative,current_drafts=pending).expected is None
     assert ai_skills.select_skills('你刚才说更新了草案，这是怎么回事',current_drafts=pending).expected is None
 
@@ -98,7 +106,8 @@ def test_only_selected_skill_files_load_and_failure_is_closed(tmp_path):
 
 def test_real_planner_loads_skills_and_filters_schema_without_extra_context(monkeypatch):
     captured=[]
-    async def provider(text,system,config,max_tokens):
+    async def provider(text,system,config,max_tokens,**options):
+        assert options.get('json_mode') is True
         captured.append((json.loads(text),system))
         return json.dumps({'calls':[{'name':'calendar','arguments':{'start':'2026-10-14','end':'2026-10-15'}}]})
     monkeypatch.setattr(claude_client,'get_claude_config',lambda:None)
@@ -111,6 +120,25 @@ def test_real_planner_loads_skills_and_filters_schema_without_extra_context(monk
     assert set(packet['schema']['$defs']['ToolCall']['properties']['name']['enum'])==ai_skills.READ_TOOLS
     assert 'planning_schema' not in packet and 'breakdown_schema' not in packet
     assert len(json.dumps(packet,ensure_ascii=False))+len(system)<12000
+
+
+@pytest.mark.parametrize('text', ['今天有点累', '解释一下递归和迭代', '先不要帮我安排', '如果今晚安排90分钟会怎样'])
+def test_plain_chat_needs_no_provider_tool_selection(monkeypatch, text):
+    async def reject(*args, **kwargs):
+        raise AssertionError('an empty tool set must not require a provider call')
+    monkeypatch.setattr(claude_client, 'request_claude', reject)
+    monkeypatch.setattr(claude_client, 'get_claude_config', lambda: None)
+    result = asyncio.run(real_plan({'message': text, 'history': [], 'context': {}}))
+    assert result.calls == [] and result.questions == [] and not result.continue_after_read
+
+
+def test_plain_chat_still_rejects_unavailable_skill_instructions(monkeypatch):
+    def reject(*args, **kwargs):
+        raise claude_client.AIServiceError('AI_SKILLS_UNAVAILABLE')
+    monkeypatch.setattr(ai_skills, 'compose', reject)
+    with pytest.raises(claude_client.AIServiceError) as caught:
+        asyncio.run(real_plan({'message': '今天有点累', 'history': [], 'context': {}}))
+    assert caught.value.code == 'AI_SKILLS_UNAVAILABLE'
 
 
 def test_reply_also_uses_core_and_selected_skill_files(monkeypatch):

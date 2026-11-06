@@ -779,6 +779,7 @@ def confirm_growth_draft(id:int,db:Session=Depends(get_db),expected_version:str|
         operations=draft.payload['operations']
         if len(operations)>10: fail('INVALID_DRAFT','一次最多确认10项修改。',422)
         category_refs={}
+        chat_receipts=[]
         if draft.scope=='profile':
             for operation in operations:
                 if operation['op']=='create_category':
@@ -790,6 +791,10 @@ def confirm_growth_draft(id:int,db:Session=Depends(get_db),expected_version:str|
                     row=update_category(db,operation['key'],**fields)
         for operation_index, operation in enumerate(operations):
             op=operation.get('op')
+            if draft.payload.get('tool_key') and op in ('create_time_rule','update_time_rule','work_timer'):
+                from ..codex.chat_capabilities import apply_operation
+                chat_receipts.append(apply_operation(db,'profile' if draft.scope=='profile' else 'feedback',operation,f'chat-draft-{draft.id}-{operation_index}'))
+                continue
             if draft.scope=='profile' and op in ('create_category','update_category'):
                 continue
             if draft.scope=='profile' and op=='set_direction':
@@ -848,6 +853,7 @@ def confirm_growth_draft(id:int,db:Session=Depends(get_db),expected_version:str|
             else: fail('INVALID_DRAFT','草案包含不支持的修改。',422)
         if draft.scope=='profile' and operations:
             db.flush(); record_profile_revision(db)
+        draft.payload={**draft.payload,'receipt':{'saved':True,'operations':chat_receipts}}
         draft.status='applied'; draft.applied_at=utc_now(); bump_revision(db); db.commit()
         return {'id':draft.id,'status':'applied','message':'已保存。可以将这项修改带入规划，另行生成日程候选。'}
     except Exception:

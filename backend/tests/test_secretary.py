@@ -172,8 +172,9 @@ def test_long_summary_budget_and_deleted_source_is_inaccessible(client,test_engi
 
 
 def test_old_v4_cannot_erase_memory_summary_and_v5_roundtrip(client,summarize):
-    old=call(client,'GET','/api/data/export');assert old['format_version']==5
+    old=call(client,'GET','/api/data/export');assert old['format_version']==6
     old['format_version']=4;del old['tables']['memory_entries']
+    old['tables'].pop('calendar_entries',None);old['tables'].pop('calendar_mutations',None)
     assert client.post('/api/data/import',json=old).status_code==200
     call(client,'POST','/api/memories',json={'client_request_id':'protect','text':'喜欢先看例子','scope':'study'})
     assert client.post('/api/data/import',json=old).json()['detail']['code']=='LEGACY_RESTORE_SECRETARY_PRESENT'

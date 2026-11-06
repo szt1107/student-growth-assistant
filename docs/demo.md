@@ -36,11 +36,11 @@
 
 维护者可直接使用 `& .\scripts\启动演示版.ps1 -MockIntegration`，每次新建空匿名 Mock 库，沿用现有 PID/启动时间/可执行路径记录；完成后用 `& .\scripts\停止演示版.ps1` 停止本次服务，保留数据库。该选项不会改写普通样例库的路径记录，切回普通演示仍使用原资料。
 
-其他组员激活自己的 Python 3.11 项目环境后，以下命令的 `conda run -n app_env --no-capture-output python` 可直接替换为 `python`；第二个终端仍使用原有 npm 环境。
+手动启动时，先在后端终端激活项目的 Python 环境，再在第二个终端运行前端。
 
 ```powershell
 # 终端一：每次创建新的 scripts/.runtime/demo-integration-UUID.db
-conda run -n app_env --no-capture-output python scripts/integration_demo.py --serve --port 8001
+python scripts/integration_demo.py --serve --port 8001
 # 终端二：已有Node环境，明确连接隔离后端
 $env:VITE_API_BASE_URL='http://127.0.0.1:8001'
 npm --prefix frontend run dev -- --host 127.0.0.1 --port 5174 --strictPort
@@ -53,7 +53,7 @@ npm --prefix frontend run dev -- --host 127.0.0.1 --port 5174 --strictPort
 也可以在**另一份新启动的空演示库**上运行HTTP自动集成：
 
 ```powershell
-conda run -n app_env python scripts/integration_demo.py --verify --output scripts/.local/integration-demo.json
+python scripts/integration_demo.py --verify --output scripts/.local/integration-demo.json
 ```
 
 该工具仅接受loopback HTTP和带本工具Mock标记、固定时钟、空任务的演示实例；正常演示服务缺少标记时在任何写操作前拒绝。运行后会产生匿名任务，不能对同一库重复要求“空库”验收。它验证Mock拆解→编辑时长/DDL/顺序→幂等确认→仅子任务排程→正式确认→新增课程→旧候选409拒绝且正式计划不变→局部修复移动1项并逐片段保留其他任务→确认→40分钟完成反馈→成长统计与1/2父进度。输出明确标为HTTP集成，不能当作浏览器E2E。

@@ -1,3 +1,4 @@
+import { loadJsx } from './codex/load-jsx.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -7,22 +8,7 @@ import { transformWithEsbuild } from 'vite'
 import { breakdownPayload, breakdownTotals, editableContent, groupTasks, moveChild } from '../src/taskHierarchy.js'
 import { createTaskBreakdown, getTaskBreakdowns, getTaskBreakdown, editTaskBreakdown, confirmTaskBreakdown, discardTaskBreakdown } from '../src/api.js'
 
-async function component(name) {
-  const path = new URL(`../src/components/${name}.jsx`, import.meta.url)
-  let source = await readFile(path, 'utf8')
-  if(name==='WorkspaceDraft'){
-    const breakdown=await component('TaskBreakdown')
-    source=source.replace("from './TaskBreakdown.jsx'",`from '${breakdown.url}'`)
-  }
-  if (name !== 'EditRecovery' && source.includes("from './EditRecovery.jsx'")) {
-    const recovery = await component('EditRecovery')
-    source = source.replace("from './EditRecovery.jsx'", `from '${recovery.url}'`)
-  }
-  const imports = source.replace(/from '(\.\.\/[^']+)'/g, (_, relative) => `from '${new URL(relative, path).href}'`).replace("from 'react'", `from '${import.meta.resolve('react')}'`)
-  const compiled = await transformWithEsbuild(`import React from '${import.meta.resolve('react')}';\n${imports}`, `${name}.jsx`, { jsx: 'transform', jsxFactory: 'React.createElement' })
-  const url = `data:text/javascript;base64,${Buffer.from(compiled.code).toString('base64')}`
-  return { ...await import(url), url }
-}
+async function component(name) { return loadJsx(new URL(`../src/components/${name}.jsx`,import.meta.url)) }
 
 const { default: TaskHierarchy } = await component('TaskHierarchy')
 const { BreakdownEditor } = await component('TaskBreakdown')

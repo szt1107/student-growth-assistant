@@ -1,9 +1,11 @@
+import { Button } from '../codex/ui/controls.js'
 import { useEffect, useRef, useState } from 'react'
 import { cancelAssistantRun, confirmGrowthDraft, createAssistantRun, discardGrowthDraft, getAssistantRun, getAssistantSession, getAssistantSettings, openWorkspaceSession, retryAssistantRun } from '../api.js'
 import { UI_COPY } from '../uiCopy.js'
 import ChatMessages from './ChatMessages.jsx'
 import SafeMessage from './SafeMessage.jsx'
 import EditRecovery, { useEditRecovery } from './EditRecovery.jsx'
+import ChatComposer from '../codex/ChatComposer.jsx'
 const labels = { profile: '档案助手', review: '复盘助手' }
 
 export default function WorkspaceChat({ scope, weekStart, onAdjustTask, onDraftConfirmed, observe = true, workspace }) {
@@ -131,23 +133,23 @@ export default function WorkspaceChat({ scope, weekStart, onAdjustTask, onDraftC
 
   return <><section className="workspace-chat" aria-label={`${labels[scope]}聊天`}>
     <EditRecovery recovery={recovery} label="业务助手输入"/>
-    {legacyInput&&<section className="recovery-note" aria-label="旧版输入对照"><p>检测到只按业务类型记录的旧版输入，请核对归属后手动带入；原缓存继续保留。</p><details><summary>查看旧版输入</summary><pre>{legacyInput}</pre></details><button className="button subtle" disabled={Boolean(text)} onClick={()=>{setText(legacyInput);setLegacyInput('')}}>带入旧版输入</button></section>}
+    {legacyInput&&<section className="recovery-note" aria-label="旧版输入对照"><p>检测到只按业务类型记录的旧版输入，请核对归属后手动带入；原缓存继续保留。</p><details><summary>查看旧版输入</summary><pre>{legacyInput}</pre></details><Button className="button subtle" disabled={Boolean(text)} onClick={()=>{setText(legacyInput);setLegacyInput('')}}>带入旧版输入</Button></section>}
     <div className="workspace-chat-heading"><div><h3>{labels[scope]}</h3></div></div>
     <ChatMessages className="workspace-chat-messages" revision={data?.messages?.at(-1)?.id}>
       {!data?.messages?.length && <p className="growth-empty">{placeholder}</p>}
       {data?.messages?.map((message) => <article key={message.id} className={`workspace-message ${message.role}`}><strong>{message.role === 'user' ? '我' : labels[scope]}</strong><SafeMessage text={message.text} /></article>)}
     </ChatMessages>
-    {run?.status === 'running' && <div className="workspace-run-status" role="status"><span>{phaseText}</span><button type="button" className="button subtle" disabled={!run?.id} onClick={cancel}>取消</button></div>}
-    {run?.status === 'failed' && <div className="workspace-run-status error" role="status"><span>处理未完成，输入仍保留。</span><button type="button" className="button subtle" onClick={retry}>重试</button></div>}
+    {run?.status === 'running' && <div className="workspace-run-status" role="status"><span>{phaseText}</span><Button type="button" className="button subtle" disabled={!run?.id} onClick={cancel}>取消</Button></div>}
+    {run?.status === 'failed' && <div className="workspace-run-status error" role="status"><span>处理未完成，输入仍保留。</span><Button type="button" className="button subtle" onClick={retry}>重试</Button></div>}
     {error && run?.status !== 'failed' && <p className="error-message" role="alert">{error}</p>}
-    <form className="workspace-chat-input" onSubmit={send}><textarea value={text} onChange={(event) => { requestId.current=null; setText(event.target.value) }} rows={2} aria-label={scope==='profile'?'修改目标或偏好':'记录执行或询问进展'} placeholder={scope==='profile'?'修改目标或偏好':'记录执行或询问进展'} disabled={busy || !session} /><button className="button primary" disabled={busy || !text.trim() || !session}>发送</button></form>
+    <ChatComposer active={observe} value={text} onChange={event=>{requestId.current=null;setText(event.target.value)}} onSubmit={send} label={scope==='profile'?'修改目标或偏好':'记录执行或询问进展'} placeholder={scope==='profile'?'修改目标或偏好':'记录执行或询问进展'} disabled={busy||!session} sendDisabled={run?.status==='running'}/>
   </section>
     {data?.draft && <div className="workspace-draft"><div className="draft-heading"><strong>{scope==='profile'?'修改待保存':'记录待保存'}</strong></div>
       {(data.draft.changes || []).map((change, index) => <article className="draft-change" key={`${change.title}-${index}`}><strong>{change.title}</strong><div><span>修改前：{change.before || '无'}</span><span>修改后：{change.after || '未提供'}</span></div><small>{change.impact}</small></article>)}
       {(data.draft.questions || []).map((question, index) => <p className="draft-question" key={index}>{question}</p>)}
-      <div className="button-row"><button className="button primary" disabled={busy} onClick={confirmDraft}>{scope==='profile'?UI_COPY.saveProfile:UI_COPY.saveFeedback}</button><button className="button subtle" disabled={busy} onClick={() => act(() => discardGrowthDraft(data.draft.id))}>放弃</button></div>
+      <div className="button-row"><Button className="button primary" disabled={busy} onClick={confirmDraft}>{scope==='profile'?UI_COPY.saveProfile:UI_COPY.saveFeedback}</Button><Button className="button subtle" disabled={busy} onClick={() => act(() => discardGrowthDraft(data.draft.id))}>放弃</Button></div>
 
     </div>}
-    {confirmedDraft && <div className="workspace-confirmed"><strong>已保存</strong><button className="button secondary" onClick={() => onAdjustTask?.({ text: '根据刚确认的档案或执行记录，重新评估本周安排。' })}>{UI_COPY.adjust}</button></div>}
+    {confirmedDraft && <div className="workspace-confirmed"><strong>已保存</strong><Button className="button secondary" onClick={() => onAdjustTask?.({ text: '根据刚确认的档案或执行记录，重新评估本周安排。' })}>{UI_COPY.adjust}</Button></div>}
   </>
 }

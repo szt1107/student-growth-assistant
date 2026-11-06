@@ -1,9 +1,12 @@
+import { Alert } from '../codex/ui/controls.js'
+import { Button, Input, Label } from '../codex/ui/controls.js'
 import { useEffect, useRef, useState } from 'react'
-import { createConversation, deleteConversation, getConversations, updateConversation } from '../api.js'
+import { createConversation, deleteConversation, getConversations, updateConversation, ensureConversationRuntime, startConversationRun } from '../api.js'
 import { editKey, readEdit, requestGate, writeEdit } from '../workbench.js'
 import ConversationChat from './ConversationChat.jsx'
 import WorkspaceChat from './WorkspaceChat.jsx'
-import ConversationMenu, { ConversationRow } from './ConversationMenu.jsx'
+import { ConversationRow } from '../codex/ConversationActions.jsx'
+import ChatComposer from '../codex/ChatComposer.jsx'
 
 export default function ConversationManager({ workspace, onOpen, children, active, onNavigate, onBusinessSaved, onAdjustTask, today }) {
   const [selected, setSelected] = useState(null), [target, setTarget] = useState(null), [ready, setReady] = useState(false)
@@ -14,6 +17,8 @@ export default function ConversationManager({ workspace, onOpen, children, activ
   const [menu, setMenu] = useState(null)
   const renameInput = useRef(null), deleteConfirm = useRef(null), pendingFocus = useRef(null), listIdentity = useRef(null)
   const [intent,setIntent]=useState(null)
+  const [welcomeText,setWelcomeText]=useState('')
+  const [welcomeMode,setWelcomeMode]=useState(null), [firstMode,setFirstMode]=useState(null)
   const gate = useRef(requestGate()), lock = useRef(false), createKey = useRef(null)
   useEffect(() => { setMenu(null) }, [search, archive, active])
   useEffect(() => { if (rename) { renameInput.current?.focus(); renameInput.current?.select() } }, [rename?.id])
@@ -77,19 +82,36 @@ export default function ConversationManager({ workspace, onOpen, children, activ
     catch (cause) { setError(cause.message); if (cause.code === 'CONVERSATION_VERSION_CONFLICT') { pendingFocus.current = focusReturn(); setLoading(true); setRevision(value => value + 1); setDetailVersion(value => value + 1) } }
     finally { lock.current = false; setBusy(false) }
   }
-  function fresh() {
+  function fresh(firstText = '', mode = null) {
+    const prompt=typeof firstText==='string'?firstText.trim():''
     action(async () => {
+      if(prompt)await ensureConversationRuntime()
       createKey.current ||= crypto.randomUUID()
       try { writeEdit(sessionStorage, editKey(workspace, 'create-request'), null, createKey.current) } catch { setStorageWarning('无法保存新建重试标识；请确认结果后再刷新。') }
       const row = await createConversation({ client_request_id: createKey.current })
+      const firstMessageId=createKey.current
+      setFirstMode({id:row.id,mode})
       createKey.current = null
       try { sessionStorage.removeItem(editKey(workspace, 'create-request')) } catch { /* same key only */ }
-      open(row.id)
+      if(prompt){
+        // Retain a retryable input before sending the first message in a new chat.
+        try{writeEdit(sessionStorage,editKey(workspace,`conversation:${row.id}:input`),`${row.id}:conversation`,{text:prompt,requestId:firstMessageId,mode})}catch{setStorageWarning('浏览器无法保存输入缓存；发送失败时请保留原文。')}
+        try{await startConversationRun(row.id,{client_message_id:firstMessageId,text:prompt,mode,draft_versions:[]});setWelcomeText('')}
+        finally{open(row.id)}
+      }else open(row.id)
     })
   }
   async function discuss(range){
     if(Number.isSafeInteger(selected)){setIntent({key:crypto.randomUUID(),range,text:`请与我回顾${range.start}至${range.end}（不含）的实际记录。`});onOpen();return}
     action(async()=>{const row=await createConversation({client_request_id:crypto.randomUUID()});open(row.id);setIntent({key:crypto.randomUUID(),range,text:`请与我回顾${range.start}至${range.end}（不含）的实际记录。`})})
+  }
+  function discussRequest(text) {
+    const next = { key: crypto.randomUUID(), text }
+    if (Number.isSafeInteger(selected)) { setIntent(next); onOpen(); return }
+    action(async () => {
+      const row = await createConversation({ client_request_id: crypto.randomUUID() })
+      open(row.id); setIntent(next)
+    })
   }
   const currentMenu = rows.find(row => row.id === menu?.id)
   const menuItems = currentMenu ? [
@@ -100,32 +122,31 @@ export default function ConversationManager({ workspace, onOpen, children, activ
     ...(currentMenu.message_matches || []).map(match => ({ key: `match-${match.message_id}`, label: `查看匹配：${match.snippet}`, match: true, select: () => open(currentMenu.id, match.message_id) })),
   ] : []
   const sidebar = <div className="conversation-list">
-    <div className="conversation-toolbar"><button className="button secondary conversation-new" disabled={busy || !ready} onClick={fresh}>＋ 新对话</button>
+    <div className="conversation-toolbar"><Button className="button secondary conversation-new" disabled={busy || !ready} onClick={fresh}>新对话</Button>
     <form className="conversation-search" role="search" aria-label="搜索会话" onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setError('') }}>
-      <input aria-label="搜索会话" type="search" placeholder="搜索会话" title="搜索标题或正文" maxLength={100} value={query} onChange={event => setQuery(event.target.value)} />
-      <button type="submit" className="button subtle">搜索</button>
+      <Input className="rounded-none border-0 bg-transparent" aria-label="搜索会话" type="search" placeholder="搜索会话" title="搜索标题或正文" maxLength={100} value={query} onChange={event => setQuery(event.target.value)} />
+      <Button type="submit" className="button subtle">搜索</Button>
     </form>
-    <div className="conversation-filters"><button className="button subtle" aria-pressed={!search && archive === 'active'} onClick={() => { setArchive('active'); setSearch(''); setQuery('') }}>最近</button><button className="button subtle" aria-pressed={!search && archive === 'archived'} onClick={() => { setArchive('archived'); setSearch(''); setQuery('') }}>归档</button><button className="button subtle conversation-refresh" aria-label="刷新列表" title="刷新列表" onClick={() => { setRevision(value => value + 1); setDetailVersion(value => value + 1) }}>↻</button></div>
-    {search && <button type="button" className="button subtle conversation-clear" onClick={() => { setQuery(''); setSearch('') }}>清除搜索</button>}</div>
+    <div className="conversation-filters"><Button className="button subtle" aria-pressed={!search && archive === 'active'} onClick={() => { setArchive('active'); setSearch(''); setQuery('') }}>最近</Button><Button className="button subtle" aria-pressed={!search && archive === 'archived'} onClick={() => { setArchive('archived'); setSearch(''); setQuery('') }}>归档</Button><Button className="button subtle conversation-refresh" aria-label="刷新列表" title="刷新列表" onClick={() => { setRevision(value => value + 1); setDetailVersion(value => value + 1) }}>↻</Button></div>
+    {search && <Button type="button" className="button subtle conversation-clear" onClick={() => { setQuery(''); setSearch('') }}>清除搜索</Button>}</div>
     {storageWarning && <p role="status" className="helper">{storageWarning}</p>}
-    {error && <p role="alert" className="error-box">{error}</p>}
+    {error && <Alert variant="destructive" role="alert">{error}</Alert>}
     {rename && <form className="conversation-rename" onSubmit={event => { event.preventDefault(); action(async () => {
       const current = rows.find(row => row.id === rename.id)
       await updateConversation(rename.id, { expected_version: current?.version || rename.version, title: rename.title.trim() }); setRename(null)
-    }) }}><label>会话标题<input ref={renameInput} value={rename.title} required maxLength={160} onChange={event => setRename({ ...rename, title: event.target.value })} /></label><button className="button secondary" disabled={busy}>保存标题</button><button type="button" className="button subtle" onClick={() => { restoreRowFocus(rename.id); setRename(null) }}>取消改名</button></form>}
-    {remove && <section className="recovery-note" aria-label="删除会话确认"><p>删除“{remove.title}”？这是软删除：会话会被隐藏，正文仍在本地和整库备份中；正式任务、日程、目标和反馈不会删除。</p><button ref={deleteConfirm} className="button secondary" disabled={busy || loading} onClick={() => action(async () => { await deleteConversation(remove.id, rows.find(row=>row.id===remove.id)?.version||remove.version); setRemove(null) })}>确认删除会话</button><button className="button subtle" onClick={() => { restoreRowFocus(remove.id); setRemove(null) }}>取消删除</button></section>}
+    }) }}><Label>会话标题<Input ref={renameInput} value={rename.title} required maxLength={160} onChange={event => setRename({ ...rename, title: event.target.value })} /></Label><Button className="button secondary" disabled={busy}>保存标题</Button><Button type="button" className="button subtle" onClick={() => { restoreRowFocus(rename.id); setRename(null) }}>取消改名</Button></form>}
+    {remove && <section className="recovery-note" aria-label="删除会话确认"><p>删除“{remove.title}”？这是软删除：会话会被隐藏，正文仍在本地和整库备份中；正式任务、日程、目标和反馈不会删除。</p><Button ref={deleteConfirm} className="button secondary" disabled={busy || loading} onClick={() => action(async () => { await deleteConversation(remove.id, rows.find(row=>row.id===remove.id)?.version||remove.version); setRemove(null) })}>确认删除会话</Button><Button className="button subtle" onClick={() => { restoreRowFocus(remove.id); setRemove(null) }}>取消删除</Button></section>}
     <div className="conversation-groups" aria-label="会话列表">
     {['置顶', search ? '搜索结果' : archive === 'archived' ? '已归档' : '最近会话'].map((group, index) => {
       const groupRows = rows.filter(row => Boolean(row.pinned_at) === (index === 0))
-      return groupRows.length > 0 && <section key={group} aria-label={group}><h2>{group}</h2>{groupRows.map(row => <ConversationRow key={row.id} row={row} selected={selected === row.id} expanded={menu?.id === row.id} disabled={busy || loading}
-        onOpen={() => open(row.id, search && !row.title_match ? row.message_matches?.[0]?.message_id : null)} onMenu={(anchor, last = false) => setMenu(menu?.id === row.id ? null : { id: row.id, anchor, last })} />)}</section>
+      return groupRows.length > 0 && <section key={group} aria-label={group}>{group!=='最近会话'&&<h2>{group}</h2>}{groupRows.map(row => <ConversationRow key={row.id} row={row} selected={selected === row.id} expanded={menu?.id === row.id} disabled={busy || loading}
+        items={menuItems.map(item=>({...item,disabled:busy||loading}))} onClose={closeMenu}
+        onOpen={() => open(row.id, search && !row.title_match ? row.message_matches?.[0]?.message_id : null)} onMenu={(anchor, last = false) => setMenu({ id: row.id, anchor, last })} />)}</section>
     })}
     {loading && <p role="status">正在读取会话列表…</p>}{!loading && !rows.length && <p className="helper">没有符合条件的会话。</p>}
-    {next !== null && <button className="button subtle" disabled={loading} onClick={more}>加载更多会话</button>}
+    {next !== null && <Button className="button subtle" disabled={loading} onClick={more}>加载更多会话</Button>}
     </div>
-    <button className="button subtle conversation-planning" aria-current={selected === 'planning' ? 'true' : undefined} onClick={() => open('planning')}>本周规划入口</button>
-    {currentMenu && menu && <ConversationMenu anchor={menu.anchor} last={menu.last} items={menuItems.map(item=>({...item,disabled:busy||loading}))} onClose={closeMenu} />}
   </div>
-  return children({ sidebar, discussReview:discuss, planning: selected === 'planning', openPlanning: () => open('planning'), openConversation: open,
-    chat: ready && Number.isSafeInteger(selected) ? <ConversationChat onLocate={messageId=>{setTarget(messageId);setDetailVersion(value=>value+1)}} today={today} intent={intent} active={active} onNavigate={onNavigate} key={`${workspace}:${selected}`} workspace={workspace} id={selected} target={target} revision={detailVersion} onChanged={() => setRevision(value => value + 1)} /> : selected?.startsWith?.('tool-') ? <WorkspaceChat workspace={workspace} key={selected} scope={selected.slice(5)} observe={active} onAdjustTask={onAdjustTask} onDraftConfirmed={onBusinessSaved}/> : <section className="workspace-chat conversation-start"><h2>从一件事开始</h2><p>从一个想法开始，自由交流或查看已有记录。</p><button className="button primary" disabled={busy} onClick={fresh}>开始新对话</button></section>, openBusiness: scope => open('tool-'+scope) })
+  return children({ sidebar, discussRequest, discussReview:discuss, planning: selected === 'planning', openPlanning: () => open('planning'), openConversation: open,
+    chat: ready && Number.isSafeInteger(selected) ? <ConversationChat initialMode={firstMode?.id===selected?firstMode.mode:null} onLocate={messageId=>{setTarget(messageId);setDetailVersion(value=>value+1)}} today={today} intent={intent} active={active} onNavigate={onNavigate} key={`${workspace}:${selected}`} workspace={workspace} id={selected} target={target} revision={detailVersion} onChanged={() => { setRevision(value => value + 1); onBusinessSaved?.() }} /> : selected?.startsWith?.('tool-') ? <WorkspaceChat workspace={workspace} key={selected} scope={selected.slice(5)} observe={active} onAdjustTask={onAdjustTask} onDraftConfirmed={onBusinessSaved}/> : <section className="workspace-chat aui-thread" data-empty="true"><footer className="aui-footer"><div className="aui-welcome"><h3>今天想从哪里开始？</h3></div>{error&&<p role="alert">{error}</p>}<ChatComposer active={active} value={welcomeText} mode={welcomeMode} onModeChange={setWelcomeMode} onChange={event=>setWelcomeText(event.target.value)} maxLength={2000} disabled={busy||!ready} onSubmit={event=>{event.preventDefault();fresh(welcomeText,welcomeMode)}}/></footer></section>, openBusiness: scope => open('tool-'+scope) })
 }

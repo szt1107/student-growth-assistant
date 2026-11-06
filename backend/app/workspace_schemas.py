@@ -50,7 +50,7 @@ class DraftRef(StrictModel):
 
 
 class ToolCall(StrictModel):
-    name: Literal['tasks','goals','preferences','calendar','review','memories','planning_draft','breakdown_draft','profile_draft','feedback_draft','edit_draft','memory_suggestion','review_draft']
+    name: Literal['tasks','goals','preferences','calendar','review','memories','attention','time_rules','task_execution','planning_draft','breakdown_draft','profile_draft','feedback_draft','edit_draft','memory_suggestion','review_draft']
     arguments: dict = Field(default_factory=dict)
 
 
@@ -61,7 +61,7 @@ class ToolPlan(StrictModel):
 
     @model_validator(mode='after')
     def safe_continuation(self):
-        if self.continue_after_read and (not self.calls or any(c.name not in ('tasks','goals','preferences','calendar','review','memories') for c in self.calls)):
+        if self.continue_after_read and (not self.calls or any(c.name not in ('tasks','goals','preferences','calendar','review','memories','attention','time_rules','task_execution') for c in self.calls)):
             raise ValueError('Only a read-only query batch can request another planning step')
         return self
 
@@ -124,5 +124,6 @@ class ReviewDraftCreate(StrictModel):
 
 
 class ConversationToolRun(ConversationMessageCreate):
+    mode: Literal['plan', 'review', 'profile'] | None = None
     draft_versions: list[DraftRef] = Field(default_factory=list,max_length=20)
     review_range: RangeArgs | None = None

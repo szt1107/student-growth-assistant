@@ -1,5 +1,6 @@
 """Versioned JSON backup and transactional restore for the local single-user app."""
 
+from contextlib import closing
 from datetime import date, datetime, time, timezone
 from enum import Enum
 import hashlib
@@ -20,7 +21,7 @@ from ..models import AssistantProposal, AssistantRun, AssistantSession, Assistan
 from .planning_state import begin_planning_transaction, get_or_create_planning_state
 
 
-FORMAT_VERSION = 5
+FORMAT_VERSION = 6
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 RETAIN_BACKUPS = 5
 
@@ -66,20 +67,23 @@ def create_sqlite_backup(engine: Engine, *, force: bool = False) -> Path | None:
     nonce = uuid4().hex
     label = f"{timestamp}-{nonce}-pre-restore" if force else today
     destination = daily_path if not force else folder / f"{label}.sqlite"
-    temporary = folder / f".{label}-{os.getpid()}-{nonce}.tmp"
+    # A UUID is already unique; repeating the destination label can exceed
+    # Windows' SQLite path limit in deeply nested project directories.
+    temporary = folder / f".{nonce}.tmp"
 
-    source = sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True, timeout=30)
-    target = sqlite3.connect(temporary, timeout=30)
     try:
-        source.backup(target)
-        integrity = target.execute("PRAGMA integrity_check").fetchone()
-        if not integrity or integrity[0] != "ok":
-            raise RuntimeError("SQLite backup did not pass integrity_check")
-        target.commit()
+        # closing releases the source even when opening the target fails.
+        # sqlite3.Connection's own context manager only ends the transaction.
+        with closing(sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True, timeout=30)) as source:
+            with closing(sqlite3.connect(temporary, timeout=30)) as target:
+                source.backup(target)
+                integrity = target.execute("PRAGMA integrity_check").fetchone()
+                if not integrity or integrity[0] != "ok":
+                    raise RuntimeError("SQLite backup did not pass integrity_check")
+                target.commit()
+        temporary.replace(destination)
     finally:
-        target.close()
-        source.close()
-    temporary.replace(destination)
+        temporary.unlink(missing_ok=True)
 
     backups = sorted(folder.glob("*.sqlite"), key=lambda item: (item == destination, item.stat().st_mtime_ns, item.name), reverse=True)
     for old in backups[RETAIN_BACKUPS:]:
@@ -257,7 +261,7 @@ def _prepare_snapshot(snapshot: dict) -> tuple[list[tuple[Table, list[dict]]], i
         raise HTTPException(status_code=422, detail="备份文件包含无法读取的数据")
     if size > MAX_SNAPSHOT_BYTES:
         raise HTTPException(status_code=413, detail="备份文件超过 25 MB 限制")
-    if type(snapshot["format_version"]) is not int or snapshot["format_version"] not in (1, 2, 3, 4, FORMAT_VERSION):
+    if type(snapshot["format_version"]) is not int or snapshot["format_version"] not in (1, 2, 3, 4, 5, FORMAT_VERSION):
         raise HTTPException(status_code=422, detail="不支持此备份版本")
     if snapshot["timezone"] != "UTC" or not isinstance(snapshot["tables"], dict):
         raise HTTPException(status_code=422, detail="备份时区或数据表结构无效")
@@ -277,6 +281,14 @@ def _prepare_snapshot(snapshot: dict) -> tuple[list[tuple[Table, list[dict]]], i
         snapshot = _convert_legacy_v3(snapshot)
     if snapshot['format_version'] == 4:
         snapshot = _convert_legacy_v4(snapshot)
+    if snapshot['format_version'] == 5:
+        from copy import deepcopy
+        snapshot=deepcopy(snapshot)
+        if any(name in snapshot['tables'] for name in ('calendar_entries','calendar_mutations')):
+            raise HTTPException(422,detail='旧v5备份不能包含新版日历表')
+        snapshot['tables']['calendar_entries']=[]
+        snapshot['tables']['calendar_mutations']=[]
+        snapshot['format_version']=6
 
     metadata = Base.metadata
     expected = set(metadata.tables)
@@ -320,6 +332,9 @@ def _prepare_snapshot(snapshot: dict) -> tuple[list[tuple[Table, list[dict]]], i
     _validate_conversations({table.name: rows for table, rows in prepared})
     from ..workspace_schemas import ReviewContent
     tables={table.name:rows for table,rows in prepared}
+    from ..codex.calendar_api import validate_calendar_backup
+    try:validate_calendar_backup(tables)
+    except (ValueError,TypeError,KeyError):raise HTTPException(422,detail='日历事项或单次例外来源格式无效') from None
     owners={r['owner_id'] for r in tables['workspace_metadata']}
     for record in tables['review_records']:
         try:
@@ -407,6 +422,10 @@ def restore_snapshot(db: Session, snapshot: dict) -> int:
     prepared, imported_revision = _prepare_snapshot(snapshot)
     begin_planning_transaction(db)
     try:
+        if snapshot['format_version']<6:
+            from ..models import CalendarEntry
+            if db.scalar(select(CalendarEntry.id).limit(1)):
+                raise HTTPException(409,detail='当前已有新版日历事项，旧备份无法表达；请先导出新版完整备份，在独立空库恢复旧备份。')
         if snapshot['format_version'] in (1, 2):
             _protect_legacy_restore(db)
         if snapshot['format_version']<4:

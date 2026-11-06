@@ -1,0 +1,4 @@
+.voice-wave {display:flex;align-items:center;flex:1 1 0;min-width:0;height:32px;color:var(--accent,#6b9588);border-color:var(--line,#dce7e1);overflow:hidden;pointer-events:none}
+.voice-wave-canvas {display:block;flex:1;min-width:0;width:0;height:32px}
+.aui-composer-toolbar-recording .aui-composer-tools {flex:0 1 auto}
+.aui-composer-toolbar-recording .aui-composer-actions {flex-shrink:0}

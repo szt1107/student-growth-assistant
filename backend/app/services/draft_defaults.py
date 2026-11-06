@@ -36,6 +36,8 @@ def duration(text):
 
 
 def clock(text):
+    # An adjacent YYYY-MM-DD must not merge its day with the hour (2822:00).
+    text = re.sub(r'20\d{2}-\d{2}-\d{2}', '', text)
     match = re.search(r'(?:(早上|上午|中午|下午|晚上|今晚|明晚)\s*)?('+NUMBER+r')(?:点|[:：])(?:(半)|('+NUMBER+r')(?:分)?)?', text)
     if not match:return None
     hour = number(match[2]);minute = 30 if match[3] else number(match[4]) if match[4] else 0

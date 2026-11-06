@@ -1,3 +1,5 @@
+import { Alert } from '../codex/ui/controls.js'
+import { Button } from '../codex/ui/controls.js'
 import { useEffect, useState } from 'react'
 import { createTimeRule, getTimeRules, updateTimeRule } from '../api.js'
 import TimeRuleForm from '../components/TimeRuleForm.jsx'
@@ -91,7 +93,7 @@ export default function TimeRulesPage({ onDataChanged }) {
             <h4>{form.id === null ? `添加${kind === 'course' ? '课程' : '保护时间'}` : '编辑时间规则'}</h4>
             <TimeRuleForm key={`${kind}-${form.id ?? 'new'}`} kind={kind} rule={selectedRule} pending={pending} onSubmit={save} onCancel={() => setForm(null)} />
           </div>
-        ) : <button className="button primary add-button" type="button" disabled={pending} onClick={() => { setActionError(''); setForm({ kind, id: null }) }}>添加{kind === 'course' ? '课程' : '保护时间'}</button>}
+        ) : <Button className="button primary add-button" type="button" disabled={pending} onClick={() => { setActionError(''); setForm({ kind, id: null }) }}>添加{kind === 'course' ? '课程' : '保护时间'}</Button>}
         {items.length === 0 ? <p className="state-box">{emptyText}</p> : (
           <div className="card-list">
             {items.map((rule) => (
@@ -103,8 +105,8 @@ export default function TimeRulesPage({ onDataChanged }) {
                   <div><dt>重复方式</dt><dd>{RECURRENCE_LABELS[rule.recurrence]}</dd></div>
                 </dl>
                 <div className="button-row">
-                  <button className="button subtle" type="button" disabled={pending} onClick={() => { setActionError(''); setForm({ kind, id: rule.id }) }}>编辑</button>
-                  {rule.active && <button className="button subtle" type="button" disabled={pending} onClick={() => deactivate(rule)}>停用</button>}
+                  <Button className="button subtle" type="button" disabled={pending} onClick={() => { setActionError(''); setForm({ kind, id: rule.id }) }}>编辑</Button>
+                  {rule.active && <Button className="button subtle" type="button" disabled={pending} onClick={() => deactivate(rule)}>停用</Button>}
                 </div>
               </article>
             ))}
@@ -118,9 +120,9 @@ export default function TimeRulesPage({ onDataChanged }) {
     <section aria-labelledby="rules-heading">
       <div className="section-heading"><div><p className="eyebrow">我的固定安排</p><h2 id="rules-heading">课程与保护时间</h2></div></div>
       <p className="helper">日期和时间均按北京时间填写；已停用的规则仍保留在列表中。</p>
-      {actionError && <p className="error-box" role="alert">{actionError}</p>}
+      {actionError && <Alert variant="destructive" role="alert">{actionError}</Alert>}
       {loading ? <p className="state-box" role="status">正在加载时间规则…</p> : loadError ? (
-        <div className="error-box" role="alert">无法加载时间规则。 {loadError} <button className="button subtle" onClick={load} type="button">重试</button></div>
+        <div className="error-box" role="alert">无法加载时间规则。 {loadError} <Button className="button subtle" onClick={load} type="button">重试</Button></div>
       ) : <>
         <NaturalLanguageTimeRule onApply={applyProposal} manualPending={pending} />
         {section('course', '课程', '还没有课程，请先添加。')}

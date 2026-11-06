@@ -74,6 +74,15 @@ def trace_for(client,sid,rid):
     raise AssertionError('diagnostics not persisted')
 
 
+def test_plain_chat_streams_without_a_planner_round_trip(client, wire):
+    result = send(client, wire['sid'], '今天有点累，想聊聊学习上的感受。', 'direct-chat')
+    assert result['status'] == 'completed'
+    assert '真实收到的回复片段' in result['delta']
+    assert len(wire['requests']) == 1 and wire['requests'][0]['stream']
+    assert not result['content'].get('tools')
+    assert call(client, '/api/tasks') == []
+
+
 @pytest.mark.parametrize('mode',['invalid_json','schema','read_then_invalid','repeated_reads','distinct_reads','fenced','truncated','timeout'])
 def test_real_protocol_failure_or_query_loop_still_persists_editable_draft(client,wire,mode,caplog):
     caplog.set_level(logging.INFO,logger='app.services.ai_diagnostics')

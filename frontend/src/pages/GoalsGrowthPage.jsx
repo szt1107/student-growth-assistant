@@ -1,3 +1,5 @@
+import { Alert } from '../codex/ui/controls.js'
+import { Button, NativeSelect, Label } from '../codex/ui/controls.js'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -77,16 +79,15 @@ export default function ReviewPage({ onAdjustTask, active = true, refreshVersion
   }
 
   return <><section className="growth-page" aria-label="回顾与成长">
-    {onReturnChat&&<button className="button subtle" onClick={onReturnChat}>返回相关对话</button>}
-    {today&&<ReviewWorkspace workspace={workspace} today={today} active={primaryActive} refreshVersion={refreshVersion} onDiscuss={onDiscuss} onSaved={onDataChanged} resource={resource} onOpenTask={onOpenTask}/>}
-    <details className="review-statistics" onToggle={e=>{if(e.currentTarget.open)setStatisticsMounted(true)}}><summary>统计与习惯建议</summary>{statisticsMounted&&<>
+    {onReturnChat&&<Button className="button subtle" onClick={onReturnChat}>返回相关对话</Button>}
+    {today&&<ReviewWorkspace workspace={workspace} today={today} active={primaryActive} refreshVersion={refreshVersion} onDiscuss={onDiscuss} onSaved={onDataChanged} resource={resource} onOpenTask={onOpenTask} onAnalyticsOpen={()=>setStatisticsMounted(true)} analyticsContent={<GrowthAnalytics active={primaryActive} refreshVersion={analyticsVersion} parentTasks={parentTasks} onOverview={setOverview} onOverviewError={setOverviewError} onRefresh={()=>refresh().catch(cause=>setError(cause.message))} />}/>}
+    <details className="review-statistics" onToggle={e=>{if(e.currentTarget.open)setStatisticsMounted(true)}}><summary>AI 周复盘与习惯建议</summary>{statisticsMounted&&<>
     <div className="growth-page-heading">
-      <div><h2 id="growth-heading">复盘</h2></div><span className="review-week muted">{weekStart} 周</span>
-      <button className="button primary" type="button" disabled={busy} onClick={generateReview}>{operation==='review'?'生成中…':'生成复盘'}</button>{onBusinessChat&&<button className="button secondary" onClick={onBusinessChat}>用 AI 整理执行记录</button>}
+      <div><h3 id="growth-heading">AI 周复盘</h3></div><span className="review-week muted">{weekStart} 周</span>
+      <Button className="button primary" type="button" disabled={busy} onClick={generateReview}>{operation==='review'?'生成中…':'生成复盘'}</Button>{onBusinessChat&&<Button className="button secondary" onClick={onBusinessChat}>用 AI 整理执行记录</Button>}
     </div>
-    {error && <p className="error-box" role="alert">{error}</p>}{notice && <p className="success-box" role="status">{notice}</p>}
+    {error && <Alert variant="destructive" role="alert">{error}</Alert>}{notice && <Alert role="status">{notice}</Alert>}
 
-    <GrowthAnalytics refreshVersion={analyticsVersion} parentTasks={parentTasks} onOverview={setOverview} onOverviewError={setOverviewError} onRefresh={()=>refresh().catch(cause=>setError(cause.message))} />
     <section className="growth-section">
       <div className="growth-section-heading"><div><h3>保存的周复盘说明</h3></div></div>
       <p className="helper">以下是已保存的复盘版本；上方图表基于当前有效记录。更正反馈后可重新生成复盘说明。</p>
@@ -94,12 +95,12 @@ export default function ReviewPage({ onAdjustTask, active = true, refreshVersion
     </section>
     <section className="growth-section">
       <div className="growth-section-heading"><div><h3>待确认建议</h3><h4>耗时建议</h4></div></div>{insufficient && <div className="muted">记录不足。<details><summary>分析依据</summary>同类任务至少 5 项，分布在至少 3 天；仅使用已确认的有效执行记录。</details></div>}
-      {!suggestions.length ? <p className="growth-empty">暂无建议。</p> : <div className="insight-list">{suggestions.map(({ task, context, advice }) => <article className="insight-card" key={task.id}><div><span className="insight-label">待你确认 · {categories.find((item) => item.key === context.family)?.name || context.family || '其他'}</span><h4>{task.title}</h4></div><details><summary>分析依据</summary><p>最近 28 天有 <strong>{advice.evidence.sample_count} 项不同任务</strong>、分布在 {advice.evidence.active_days} 天的有效记录。</p></details><p><strong>{advice.current_minutes} → {advice.suggested_minutes} 分钟</strong></p><button className="button secondary" disabled={busy} onClick={() => onAdjustTask?.({ taskId: task.id, title: task.title, durationMinutes: advice.suggested_minutes })}>调整安排</button></article>)}</div>}
-      <div className="growth-section-heading"><div><h3>习惯建议</h3></div><button className="button secondary" disabled={busy} onClick={analyzeInsights}>{operation==='analysis'?'分析中…':'分析记录'}</button></div>
-      {analysisMessage && <p className="success-box" role="status">{analysisMessage}</p>}
+      {!suggestions.length ? <p className="growth-empty">暂无建议。</p> : <div className="insight-list">{suggestions.map(({ task, context, advice }) => <article className="insight-card" key={task.id}><div><span className="insight-label">待你确认 · {categories.find((item) => item.key === context.family)?.name || context.family || '其他'}</span><h4>{task.title}</h4></div><details><summary>分析依据</summary><p>最近 28 天有 <strong>{advice.evidence.sample_count} 项不同任务</strong>、分布在 {advice.evidence.active_days} 天的有效记录。</p></details><p><strong>{advice.current_minutes} → {advice.suggested_minutes} 分钟</strong></p><Button className="button secondary" disabled={busy} onClick={() => onAdjustTask?.({ taskId: task.id, title: task.title, durationMinutes: advice.suggested_minutes })}>调整安排</Button></article>)}</div>}
+      <div className="growth-section-heading"><div><h3>习惯建议</h3></div><Button className="button secondary" disabled={busy} onClick={analyzeInsights}>{operation==='analysis'?'分析中…':'分析记录'}</Button></div>
+      {analysisMessage && <Alert role="status">{analysisMessage}</Alert>}
       {!insights.some((item) => item.status === 'draft') ? <p className="growth-empty">暂无建议。</p> : <div className="insight-list">{insights.filter((item) => item.status === 'draft').map((item) => {
         const window = item.proposed_rule?.start === '08:00' ? 'morning' : item.proposed_rule?.start === '12:00' ? 'afternoon' : 'evening'
-        return <article className="insight-card" key={item.id}><span className="insight-label">AI 观察草案 · 待你确认</span><h4>{item.observation}</h4><p>{item.suggestion}</p><details><summary>分析依据</summary><p className="insight-evidence">证据：{item.evidence.sample_count} 个不同任务，分布在 {item.evidence.active_days} 天。记录反映的是计时开始时间，不代表效率高低。</p></details><label>调整建议时段<select value={window} disabled={busy} onChange={(e) => changeInsightWindow(item.id, e.target.value)}><option value="morning">上午 08:00–12:00</option><option value="afternoon">下午 12:00–18:00</option><option value="evening">晚上 18:00–22:00</option></select></label><div className="button-row"><button className="button primary" disabled={busy} onClick={() => reviewInsight(item.id, 'accept')}>确认采用</button><button className="button subtle" disabled={busy} onClick={() => reviewInsight(item.id, 'ignore')}>暂不采用</button></div></article>
+        return <article className="insight-card" key={item.id}><span className="insight-label">AI 观察草案 · 待你确认</span><h4>{item.observation}</h4><p>{item.suggestion}</p><details><summary>分析依据</summary><p className="insight-evidence">证据：{item.evidence.sample_count} 个不同任务，分布在 {item.evidence.active_days} 天。记录反映的是计时开始时间，不代表效率高低。</p></details><Label>调整建议时段<NativeSelect value={window} disabled={busy} onChange={(e) => changeInsightWindow(item.id, e.target.value)}><option value="morning">上午 08:00–12:00</option><option value="afternoon">下午 12:00–18:00</option><option value="evening">晚上 18:00–22:00</option></NativeSelect></Label><div className="button-row"><Button className="button primary" disabled={busy} onClick={() => reviewInsight(item.id, 'accept')}>确认采用</Button><Button className="button subtle" disabled={busy} onClick={() => reviewInsight(item.id, 'ignore')}>暂不采用</Button></div></article>
       })}</div>}
       {insights.some((item) => item.status !== 'draft') && <details className="insight-history"><summary>已处理的建议</summary>{insights.filter((item) => item.status !== 'draft').map((item) => <p key={item.id}>{item.status === 'accepted' ? '已采用' : '已忽略'}：{item.suggestion}</p>)}</details>}
     </section>

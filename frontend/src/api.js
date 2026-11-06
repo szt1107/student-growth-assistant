@@ -61,7 +61,7 @@ async function request(path, options = {}, timeoutMs = 15000) {
 export const getTasks = () => request('/api/tasks')
 export async function ensureConversationRuntime(){
   const health=await request('/api/health')
-  if(health.runtime?.protocol!=='draft-recovery-v3'||health.runtime?.skills_available!==true){
+  if(!['draft-recovery-v3','chat-capabilities-v4'].includes(health.runtime?.protocol)||health.runtime?.skills_available!==true){
     throw new Error('后端尚未加载当前草案修复。请重启后端后再发送；本次消息尚未发送，输入已保留。')
   }
   return health.runtime
@@ -167,6 +167,7 @@ export const getReviewRecords = (values={}) => request(`/api/reviews/records?${c
 export const getReviewRecord = id => request(`/api/reviews/records/${id}`)
 export const saveReviewRecord = (data,id) => request(`/api/reviews/records${id?'/'+id:''}`,{method:id?'PATCH':'POST',body:JSON.stringify(data)})
 export const getWorkspaceDraft = (kind,id) => request(`/api/workspace/drafts/${kind}/${id}`)
+export const saveCalendarChange = payload => request('/api/calendar/changes',{method:'POST',body:JSON.stringify(payload)})
 export const editWorkspaceDraft = (kind,id,version,content) => request(`/api/workspace/drafts/${kind}/${id}`,{method:'PATCH',body:JSON.stringify({expected_version:version,content})})
 export const actWorkspaceDraft = (kind,id,version,action) => request(`/api/workspace/drafts/${kind}/${id}/${action}`,{method:'POST',body:JSON.stringify({expected_version:version})})
 export const createReviewDraft = (id,data) => request(`/api/conversations/${id}/review-drafts`,{method:'POST',body:JSON.stringify(data)},125000)
@@ -179,3 +180,25 @@ export const actMemory=(id,data)=>request(`/api/memories/${id}/actions`,{method:
 export const getConversationSummaries=id=>request(`/api/conversations/${id}/summaries`)
 export const createConversationSummary=(id,data)=>request(`/api/conversations/${id}/summaries`,{method:'POST',body:JSON.stringify(data)},125000)
 export const getSummaryRequest=(id,key)=>request(`/api/conversations/${id}/summaries/requests/${encodeURIComponent(key)}`)
+
+export async function getSpeechConfig(signal) {
+  return speechRequest('/api/speech/config', { signal })
+}
+export async function transcribeSpeech(blob, signal) {
+  return speechRequest('/api/speech/transcriptions', { method: 'POST', signal,
+    headers: { 'Content-Type': blob.type }, body: blob })
+}
+async function speechRequest(path, options) {
+  const controller = new AbortController()
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
+  const timer = setTimeout(() => controller.abort(), 135000)
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, { ...options, signal })
+    const body = await response.json()
+    if (!response.ok) throw Error(body.detail?.message || '语音服务暂不可用，请稍后重试。')
+    return body
+  } finally { clearTimeout(timer) }
+}
+export function speechRealtimeUrl() {
+  return API_BASE_URL.replace(/^http/, 'ws') + '/api/speech/realtime'
+}

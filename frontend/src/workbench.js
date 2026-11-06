@@ -34,7 +34,7 @@ export const workspacePages = ['schedule', 'review', 'profile']
 export const defaultSplitRatio = 0.58
 export const splitPreferenceKey = 'sga-v2-home-split-ratio'
 export const initialWorkbench = {
-  navigation: 'home', auxiliaryPage: 'schedule', panel: 'normal',
+  navigation: 'home', auxiliaryPage: 'schedule', panel: 'collapsed',
   conversations: true, mobile: 'primary', visited: ['schedule'], splitRatio: defaultSplitRatio,
 }
 
@@ -85,6 +85,7 @@ export function workbenchReducer(state, action) {
 
 export function workbenchVisibility(state, narrow) {
   const panel = workbenchPanel(state)
+  if (state.navigation !== 'home') return { conversations: false, primary: true, auxiliary: false }
   return {
     conversations: narrow ? state.mobile === 'conversations' : state.navigation === 'home' && state.conversations && panel !== 'expanded',
     primary: !narrow || state.mobile === 'primary',
@@ -163,5 +164,5 @@ export function restoredWorkbench(value, current) {
     { type: 'navigate', page: value.navigation }, { type: 'auxiliary', page: value.auxiliaryPage },
     { type: 'panel', value: value.panel }, { type: 'mobile', value: value.mobile },
   ]) next = workbenchReducer(next, action)
-  return { ...next, conversations: typeof value.conversations === 'boolean' ? value.conversations : current.conversations }
+  return { ...next, panel: 'collapsed', mobile: 'primary', conversations: typeof value.conversations === 'boolean' ? value.conversations : current.conversations }
 }

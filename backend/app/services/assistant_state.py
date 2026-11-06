@@ -52,8 +52,13 @@ def task_library(db):
     return tasks
 
 
-def time_rules(db):
-    return [TimeRuleInput(id=r.id,kind=r.kind.value,title=r.title,recurrence=r.recurrence.value,start_time=r.start_time,end_time=r.end_time,weekday=r.weekday,date=r.date,active=r.active) for r in db.scalars(select(TimeRule)).all()]
+def time_rules(db, include_calendar=True, calendar_entries=None):
+    from ..codex.calendar_api import calendar_rules
+    from ..models import CalendarEntry
+    entries=list(db.scalars(select(CalendarEntry)).all()) if calendar_entries is None else calendar_entries
+    rules=[TimeRuleInput(id=r.id,kind=r.kind.value,title=r.title,recurrence=r.recurrence.value,start_time=r.start_time,end_time=r.end_time,weekday=r.weekday,date=r.date,active=r.active,
+        excluded_dates=tuple(e.source_date for e in entries if e.source_rule_id==r.id)) for r in db.scalars(select(TimeRule)).all()]
+    return rules+calendar_rules(entries) if include_calendar else rules
 
 
 def baseline(db,week):

@@ -1,0 +1,45 @@
+@layer legacy, theme, base, components, utilities;
+@import "../styles.css" layer(legacy);
+@import "../compact.css" layer(legacy);
+@import "./chatgpt.css" layer(legacy);
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "./ui-integration.css" layer(components);
+@import "./layout.css" layer(components);
+@import "./chat-layout.css" layer(components);
+@import "./composer-modes.css" layer(components);
+@source "../**/*.{jsx,js}";
+
+@theme inline {
+  --color-background: var(--sga-background);
+  --color-foreground: var(--sga-foreground);
+  --color-card: var(--sga-surface);
+  --color-card-foreground: var(--sga-foreground);
+  --color-primary: var(--sga-primary);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--sga-selected);
+  --color-secondary-foreground: #14553e;
+  --color-muted: var(--sga-muted);
+  --color-muted-foreground: #586c62;
+  --color-accent: var(--sga-selected);
+  --color-accent-foreground: #14553e;
+  --color-destructive: #a63232;
+  --color-border: var(--sga-border);
+  --color-input: #bccdc2;
+  --color-ring: var(--sga-primary);
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+:root {
+  --sga-background:#fff; --sga-surface:#fff; --sga-foreground:#243e35;
+  --sga-primary:#176e58; --sga-selected:#d5e8df; --sga-muted:#edf4ef;
+  --sga-border:#dee7e1; --sga-navigation:#edf3ef; --sga-conversations:#f5f8f5;
+  --ink:var(--sga-foreground); --muted:#586c62; --line:var(--sga-border);
+  --accent:var(--sga-primary); --soft:var(--sga-muted); --surface:var(--sga-surface);
+  font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+  font-size:16px; color:var(--sga-foreground); background:var(--sga-background);
+}
+@layer components {
+  .compact-shell.v2-shell { --ink:var(--sga-foreground);--muted:#586c62;--line:var(--sga-border);--accent:var(--sga-primary);--soft:var(--sga-muted);--surface:var(--sga-surface) }
+}

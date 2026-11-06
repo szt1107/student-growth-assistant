@@ -1,30 +1,21 @@
+import { Button, Input, NativeSelect, Label } from '../codex/ui/controls.js'
 import { useEffect, useState } from 'react'
 import { getGrowthStatistics } from '../api.js'
-import { chartBars, minutesText, percentText, signedText } from '../analytics.js'
+import { minutesText, percentText, signedText } from '../analytics.js'
 import { progressPercent } from '../workbench.js'
+import ReviewWeeklyChart from '../codex/ReviewWeeklyChart.jsx'
+import { reviewRange } from '../calendar.js'
 
-export function WeeklyChart({ weekly, metric, title, unit }) {
-  const bars = chartBars(weekly, metric)
-  return <figure className="analytics-chart"><figcaption>{title}（{unit}）</figcaption>
-    <svg viewBox="0 0 700 210" role="img" aria-labelledby={`analytics-${metric}-title`}>
-      <title id={`analytics-${metric}-title`}>{`${title}，按北京时间周一开始；详细数据见下方表格`}</title>
-      <line x1="32" x2="680" y1="160" y2="160" stroke="currentColor" opacity=".3" />
-      {bars.map(({ row, value, x, width, height, incomplete }) => <g key={row.start_date} tabIndex="0" aria-label={`${row.start_date}周：${value === null ? '耗时未知或无反馈' : `${incomplete ? '已知至少' : ''}${value}${unit}`}${row.data_state === 'no_records' ? '，无安排或反馈记录' : ''}`}>
-        <title>{`${row.start_date} 周 · ${value === null ? '无完整耗时数据' : `${incomplete ? '已知 ' : ''}${value} ${unit}`} · ${row.feedback_count} 条有效反馈，${row.unknown_actual_count} 条耗时缺失`}</title>
-        {value !== null && <rect x={x} y={160 - height} width={width} height={height} rx="3" className={metric === 'completed_count' ? 'analytics-count-bar' : 'analytics-time-bar'} stroke={incomplete ? 'currentColor' : 'none'} strokeDasharray={incomplete ? '3 2' : undefined} />}
-        <text x={x + width / 2} y={value === null ? 145 : Math.max(20, 151 - height)} textAnchor="middle" className="analytics-value">{value === null ? '—' : `${incomplete ? '≥' : ''}${value}`}</text>
-        <text x={x + width / 2} y="185" textAnchor="middle">{row.start_date.slice(5)}</text>
-      </g>)}
-    </svg>
-  </figure>
+export function WeeklyChart(props) {
+  return <ReviewWeeklyChart {...props} />
 }
 
-export function AnalyticsContent({ data, parentTasks = [] }) {
+export function AnalyticsContent({ data, parentTasks = [], active = true }) {
   const week = data.overview, estimate = data.estimation
   const cards = [
     ['计划任务', `${week.planned_task_count} 项`], ['确认完成', `${week.completed_count} 项`],
-    ['当前已取消（全库）', `${data.current_cancelled_task_count} 项`], ['计划时间', `${week.planned_minutes} 分钟`],
-    ['反馈实际投入', minutesText(week.actual_minutes, week.known_actual_minutes, week.unknown_actual_count)], ['历史完成率', '暂无可靠分母'],
+    ['计划时间', `${week.planned_minutes} 分钟`],
+    ['反馈实际投入', minutesText(week.actual_minutes, week.known_actual_minutes, week.unknown_actual_count)],
   ]
   return <>
     <section className="growth-section" aria-label="成长统计概览">
@@ -33,9 +24,9 @@ export function AnalyticsContent({ data, parentTasks = [] }) {
       {week.unknown_actual_count > 0 && <p className="analytics-note">本周 {week.unknown_actual_count} 条有效反馈未记录耗时，已知小计 {week.known_actual_minutes} 分钟；未知不等于0。</p>}
     </section>
     <section className="growth-section" aria-label="跨周成长趋势">
-      <h3>最近 {data.weeks} 周趋势</h3><p className="helper">{data.start_date} 至 {data.end_date_exclusive}（结束日不含），北京时间。图表可横向滚动；“≥”表示仅有已知小计，“—”表示未知或无反馈。完整数据见表格。</p>
+      <h3>最近 {data.weeks} 周趋势</h3><p className="helper">{data.start_date} 至 {data.end_date_exclusive}（结束日不含），北京时间。点击周标签查看记录情况；“≥”表示仅有已知小计，“—”表示未知或无反馈。完整数据见表格。</p>
       {data.totals.data_state === 'no_records' && <p className="growth-empty">此范围没有可统计的安排或执行反馈。添加任务不会自动产生执行数据。</p>}
-      <div className="analytics-charts"><WeeklyChart weekly={data.weekly} metric="completed_count" title="每周确认完成" unit="项" /><WeeklyChart weekly={data.weekly} metric="actual_minutes" title="每周反馈投入" unit="分钟" /></div>
+      <div className="analytics-charts"><WeeklyChart weekly={data.weekly} metric="completed_count" title="每周确认完成" unit="项" active={active} /><WeeklyChart weekly={data.weekly} metric="actual_minutes" title="每周反馈投入" unit="分钟" active={active} /></div>
       <details><summary>查看每周数据与缺失情况</summary><div className="analytics-table-wrap"><table><caption>每周真实记录（时间先后顺序）</caption><thead><tr><th>周一</th><th>计划任务</th><th>完成</th><th>计划分钟</th><th>实际投入</th><th>记录情况</th></tr></thead><tbody>{data.weekly.map(row => <tr key={row.start_date}><th scope="row">{row.start_date}</th><td>{row.planned_task_count}</td><td>{row.completed_count}</td><td>{row.planned_minutes}</td><td>{minutesText(row.actual_minutes, row.known_actual_minutes, row.unknown_actual_count)}</td><td>{row.data_state === 'no_records' ? '无安排/反馈记录' : `${row.feedback_count}条反馈，${row.unknown_actual_count}条缺耗时`}</td></tr>)}</tbody></table></div></details>
     </section>
     <section className="growth-section" aria-label="任务类别分布">
@@ -64,32 +55,33 @@ export function AnalyticsContent({ data, parentTasks = [] }) {
       })}</div>}
       {parentTasks.length > 0 && <details><summary>项目父容器当前进度</summary>{parentTasks.map(parent => <p key={parent.id}>{parent.title}：{parent.progress?.completed_children ?? 0} / {parent.progress?.total_children ?? 0} 项完成，{parent.progress?.cancelled_children ?? 0} 项取消</p>)}<p className="helper">沿用阶段2口径：已完成子任务 / 全部子任务，取消仍在分母。父容器不额外贡献工作量。</p></details>}
     </section>
-    <details className="analytics-definitions"><summary>统计口径与数据质量</summary>{Object.entries(data.definitions).map(([key, definition]) => <p key={key}>{definition}</p>)}<p>已排除非法反馈 {data.excluded_invalid_feedback_count} 条；{data.legacy_completion_time_count} 条旧完成记录使用反馈发生时间归周。统计查询不调用AI，不改变任何正式数据。</p></details>
+    <details className="analytics-definitions"><summary>统计口径与数据质量</summary><p>当前已取消（全库）：{data.current_cancelled_task_count} 项。历史完成率：暂无可靠分母。</p>{Object.entries(data.definitions).map(([key, definition]) => <p key={key}>{definition}</p>)}<p>已排除非法反馈 {data.excluded_invalid_feedback_count} 条；{data.legacy_completion_time_count} 条旧完成记录使用反馈发生时间归周。统计查询不调用AI，不改变任何正式数据。</p></details>
   </>
 }
 
 export function AnalyticsState({ loading, error, onRetry }) {
   if (loading) return <p role="status" className="state-box">正在汇总成长记录…</p>
-  if (error) return <div role="alert" className="error-box">统计暂时无法加载：{error} <button type="button" className="button subtle" onClick={onRetry}>重试统计</button></div>
+  if (error) return <div role="alert" className="error-box">统计暂时无法加载：{error} <Button type="button" className="button subtle" onClick={onRetry}>重试统计</Button></div>
   return null
 }
 
-export default function GrowthAnalytics({ refreshVersion = 0, parentTasks = [], onRefresh, onOverview, onOverviewError }) {
+export default function GrowthAnalytics({ refreshVersion = 0, parentTasks = [], onRefresh, onOverview, onOverviewError, active = true }) {
   const [weeks, setWeeks] = useState(4), [data, setData] = useState(null), [loading, setLoading] = useState(true)
-  const [error, setError] = useState(''), [retry, setRetry] = useState(0)
+  const [error, setError] = useState(''), [retry, setRetry] = useState(0), [endWeek, setEndWeek] = useState('')
   useEffect(() => {
-    let active = true
-    setLoading(true); setError('')
-    getGrowthStatistics(weeks).then(result => {
-      if (active) { setData(result); onOverview?.(result.overview); onOverviewError?.('') }
+    if (!active) return
+    let valid = true
+    setLoading(true); setError(''); setData(null)
+    getGrowthStatistics(weeks,endWeek||undefined).then(result => {
+      if (valid) { setData(result); onOverview?.(result.overview); onOverviewError?.('') }
     }).catch(cause => {
-      if (active) { setError(cause.message); onOverviewError?.(cause.message) }
-    }).finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [weeks, refreshVersion, retry, onOverview, onOverviewError])
+      if (valid) { setError(cause.message); onOverviewError?.(cause.message) }
+    }).finally(() => { if (valid) setLoading(false) })
+    return () => { valid = false }
+  }, [active, weeks, endWeek, refreshVersion, retry, onOverview, onOverviewError])
   return <section className="growth-analytics" aria-labelledby="analytics-heading" aria-busy={loading}>
-    <div className="growth-section-heading"><h3 id="analytics-heading">成长统计</h3><div className="analytics-controls"><label>统计范围<select value={weeks} onChange={event => setWeeks(Number(event.target.value))}>{[4, 8, 12].map(value => <option key={value} value={value}>最近 {value} 周</option>)}</select></label><button type="button" className="button subtle" disabled={loading} onClick={() => onRefresh ? onRefresh() : setRetry(value => value + 1)}>刷新统计</button></div></div>
+    <div className="growth-section-heading"><h3 id="analytics-heading">成长统计</h3><div className="analytics-controls"><Label>截至周（周一）<Input type="date" min="2000-01-01" max="2100-12-31" value={endWeek||data?.overview.start_date||''} onChange={event=>setEndWeek(event.target.value?reviewRange(event.target.value,'week')[0]:'')}/></Label><Label>统计范围<NativeSelect value={weeks} onChange={event => setWeeks(Number(event.target.value))}>{[4, 8, 12].map(value => <option key={value} value={value}>最近 {value} 周</option>)}</NativeSelect></Label><Button type="button" className="button subtle" disabled={loading} onClick={() => {setRetry(value => value + 1);onRefresh?.()}}>刷新统计</Button></div></div>
     <AnalyticsState loading={loading || Boolean(data && data.weeks !== weeks)} error={error} onRetry={() => setRetry(value => value + 1)} />
-    {data?.weeks === weeks && <AnalyticsContent data={data} parentTasks={parentTasks} />}
+    {data?.weeks === weeks && <AnalyticsContent data={data} parentTasks={parentTasks} active={active} />}
   </section>
 }

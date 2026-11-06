@@ -38,6 +38,9 @@ def memory_context(db,text,signals):
 
 def context_for(db,run):
     signals=intent(run.text);owner=local_owner(db)
+    mode = run.payload.get('mode')
+    if mode in ('plan', 'review', 'profile'):
+        signals[{'plan': 'planning', 'review': 'review', 'profile': 'profile'}[mode]] = True
     rows=db.scalars(select(AssistantMessage).where(AssistantMessage.session_id==run.session_id,AssistantMessage.owner_id==owner,
         AssistantMessage.id<run.payload['user_message_id']).order_by(AssistantMessage.id.desc()).limit(40)).all()
     recall=any(word in run.text for word in ('之前','前面','上次','记得','那件','提过'))
@@ -73,7 +76,7 @@ def context_for(db,run):
     if any(signals.values()):
         # Exact user phrases retrieve older named resources as well as recent rows.
         words=terms(run.text)
-        tasks=db.scalars(select(Task).order_by(Task.id.desc()).limit(100)).all() if signals['planning'] else []
+        tasks=db.scalars(select(Task).order_by(Task.id.desc()).limit(100)).all() if signals['planning'] or selection.expected=='feedback' else []
         tasks.sort(key=lambda t:sum(w in t.title.lower() for w in words),reverse=True)
         facts['tasks']=[dict(id=t.id,title=t.title,minutes=t.duration_minutes,deadline=t.deadline.isoformat(),status=t.status.value,kind=t.task_kind,updated_at=t.updated_at.isoformat()) for t in tasks[:10]]
         if signals['profile']:
@@ -91,7 +94,7 @@ def context_for(db,run):
     links.extend({'page':'profile','kind':'memory','id':m['id'],'label':'查看记忆依据'} for m in memories)
     # Deep/date facts are read through the bounded tools, rather than sent by default.
     facts['data_note']='这里只是有界相关记录；日期/任务详情应使用白名单工具查最新事实，未查询不能推断。'
-    return {'history':history,'message':run.text,'context':facts,'evidence':evidence,'confirmed_memories':memories},links
+    return {'history':history,'message':run.text,'mode':mode,'context':facts,'evidence':evidence,'confirmed_memories':memories},links
 
 
 def provider_value(value,*,depth=0):

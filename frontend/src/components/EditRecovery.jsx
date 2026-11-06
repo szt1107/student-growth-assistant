@@ -1,3 +1,4 @@
+import { Button } from '../codex/ui/controls.js'
 import { useEffect, useRef, useState } from 'react'
 import { editKey, readEdit, writeEdit, compatibleEdit } from '../workbench.js'
 
@@ -60,8 +61,8 @@ export default function EditRecovery({ recovery, label = '编辑' }) {
     {recovery.saved && <section className="recovery-note" aria-label={`${label}恢复`}>
       <p>{recovery.conflict ? '服务端资料已变化，本地内容保留供对照，不会覆盖当前表单。' : `发现本标签页的${label}。恢复只填入编辑器，不会自动提交；请核对后再保存。`}</p>
       <details><summary>查看本地内容</summary><pre>{JSON.stringify(recovery.saved.value, null, 2)}</pre></details>
-      {!recovery.conflict && <button type="button" className="button secondary" onClick={recovery.restore}>恢复到编辑器</button>}
-      <button type="button" className="button subtle" onClick={recovery.discard}>移除这份缓存</button>
+      {!recovery.conflict && <Button type="button" className="button secondary" onClick={recovery.restore}>恢复到编辑器</Button>}
+      <Button type="button" className="button subtle" onClick={recovery.discard}>移除这份缓存</Button>
     </section>}
   </>
 }

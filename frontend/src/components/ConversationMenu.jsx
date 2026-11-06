@@ -1,3 +1,4 @@
+import { Button } from '../codex/ui/controls.js'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -14,10 +15,10 @@ export function menuPosition(anchor, size, viewport) {
 
 export function ConversationRow({ row, selected, expanded, disabled, onOpen, onMenu }) {
   return <article className="conversation-row" data-conversation-id={row.id} data-selected={selected || undefined}>
-    <button type="button" className="conversation-title" title={row.title} aria-current={selected ? 'true' : undefined} onClick={onOpen}>{row.title}</button>
-    <button type="button" id={`conversation-more-${row.id}`} className="conversation-more" aria-label={`会话“${row.title}”的更多操作`} aria-haspopup="menu" aria-expanded={expanded} aria-controls={expanded ? 'conversation-menu' : undefined} disabled={disabled}
+    <Button type="button" className="conversation-title justify-start text-left" title={row.title} aria-current={selected ? 'true' : undefined} onClick={onOpen}>{row.title}</Button>
+    <Button type="button" id={`conversation-more-${row.id}`} className="conversation-more" aria-label={`会话“${row.title}”的更多操作`} aria-haspopup="menu" aria-expanded={expanded} aria-controls={expanded ? 'conversation-menu' : undefined} disabled={disabled}
       onClick={event => { event.stopPropagation(); onMenu(event.currentTarget) }}
-      onKeyDown={event => { if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); onMenu(event.currentTarget, event.key === 'ArrowUp') } }}>···</button>
+      onKeyDown={event => { if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); onMenu(event.currentTarget, event.key === 'ArrowUp') } }}>···</Button>
   </article>
 }
 
@@ -71,7 +72,7 @@ export default function ConversationMenu({ anchor, items, last = false, onClose 
     }
   }
   return createPortal(<div ref={menu} id="conversation-menu" role="menu" aria-label="会话操作菜单" className="conversation-menu" style={position || { left: 0, top: 0, opacity: 0 }} onKeyDown={keyDown}>
-    {items.map(item => <button key={item.key} type="button" role="menuitem" tabIndex={-1} className={item.danger ? 'danger' : item.match ? 'conversation-match' : undefined} disabled={item.disabled}
-      onClick={() => { close.current(true); item.select() }}>{item.label}</button>)}
+    {items.map(item => <Button key={item.key} type="button" role="menuitem" tabIndex={-1} className={item.danger ? 'danger' : item.match ? 'conversation-match' : undefined} disabled={item.disabled}
+      onClick={() => { close.current(true); item.select() }}>{item.label}</Button>)}
   </div>, document.body)
 }

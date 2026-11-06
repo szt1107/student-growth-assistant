@@ -17,6 +17,7 @@ from .services.growth_migrations import apply_growth_migrations
 from .services.growth_data import create_daily_backup
 from .services.schema_migrations import upgrade_database
 from .services.planning_state import get_or_create_planning_state
+from .codex.speech import router as speech_router, speech_lifespan
 
 
 class HealthResponse(BaseModel):
@@ -40,11 +41,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                 if output:
                     output.content = {**(output.content or {}), 'status': 'interrupted'}
         session.commit()
-    try:
-        yield
-    finally:
-        from .services.conversation_runs import shutdown
-        await shutdown(application.state.db_engine)
+    from .services.claude_client import ai_client_session
+    async with ai_client_session(), speech_lifespan(application):
+        try:
+            yield
+        finally:
+            from .services.conversation_runs import shutdown
+            await shutdown(application.state.db_engine)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -73,6 +76,10 @@ app.include_router(taxonomy.settings_router)
 app.include_router(goals.router)
 app.include_router(growth.router)
 app.include_router(data.router)
+from .codex.calendar_api import router as calendar_router
+app.include_router(calendar_router)
+from .codex import speech_realtime
+app.include_router(speech_router)
 
 
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])

@@ -39,6 +39,9 @@ scripts/.runtime/
 .impeccable/
 skills-lock.json
 
+# Local experiments, preview artifacts and personal course data
+/codex/
+
 # Private preview maintenance and personal-course demonstration assets
 codex/任务冲突演示/
 codex/build_conflict_demo_images.py

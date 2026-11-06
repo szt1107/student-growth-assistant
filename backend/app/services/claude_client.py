@@ -5,6 +5,7 @@ No database or planning access.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 from dataclasses import dataclass, field
@@ -17,6 +18,36 @@ from . import ai_diagnostics as trace
 
 
 TIMEOUT_SECONDS = 120.0
+_shared_client = None
+
+
+@asynccontextmanager
+async def ai_client_session():
+    """Own a lazy connection pool for one app lifecycle and event loop."""
+    global _shared_client
+    previous = _shared_client
+    state = [asyncio.get_running_loop(), None]
+    _shared_client = state
+    try:
+        yield
+    finally:
+        _shared_client = previous
+        if state[1] is not None:
+            await state[1].aclose()
+
+
+@asynccontextmanager
+async def _transport():
+    state = _shared_client
+    if state is not None and state[0] is asyncio.get_running_loop():
+        if state[1] is None or state[1].is_closed:
+            state[1] = httpx.AsyncClient(timeout=TIMEOUT_SECONDS,
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=8, keepalive_expiry=60))
+        yield state[1]
+    else:
+        # CLI/test loops never reuse sockets owned by another event loop.
+        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+            yield client
 
 
 class AIServiceError(Exception):
@@ -150,19 +181,24 @@ def _wire(text, system, config, max_tokens):
     return endpoint, headers, payload
 
 
-async def request_claude(text: str, system: str, config: ClaudeConfig, max_tokens: int = 600) -> str:
+async def request_claude(text: str, system: str, config: ClaudeConfig, max_tokens: int = 600, *, json_mode: bool = False) -> str:
     trace.record('provider.request',protocol=config.api_format,stream=False,max_tokens=max_tokens)
     timeout_seconds=_request_timeout()
     try:
         endpoint, headers, payload = _wire(text, system, config, max_tokens)
+        # Only advertise this capability for documented official endpoints;
+        # compatible gateways may reject response_format.
+        if json_mode and config.api_format == 'openai' and urlsplit(config.base_url).hostname in ('api.deepseek.com', 'api.openai.com'):
+            payload['response_format'] = {'type': 'json_object'}
         trace.record('provider.budget',max_tokens=payload['max_tokens'])
         # Both per-operation and total request deadlines are bounded.
         async with asyncio.timeout(timeout_seconds):
-            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            async with _transport() as client:
                 response = await client.post(
                     endpoint,
                     headers=headers,
                     json=payload,
+                    timeout=timeout_seconds,
                 )
                 response.raise_for_status()
                 trace.record('provider.http',status=response.status_code,stream=False)
@@ -214,8 +250,8 @@ async def stream_claude(text: str, system: str, config: ClaudeConfig, max_tokens
         payload['stream'] = True
         fallback = False
         async with asyncio.timeout(timeout):
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream('POST', endpoint, headers=headers, json=payload) as response:
+            async with _transport() as client:
+                async with client.stream('POST', endpoint, headers=headers, json=payload, timeout=timeout) as response:
                     trace.record('provider.http',status=response.status_code,stream=True)
                     if response.status_code in (400, 404, 405, 415, 422, 501):
                         fallback = True

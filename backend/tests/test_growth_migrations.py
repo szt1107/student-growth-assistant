@@ -4,6 +4,7 @@ import sqlite3
 import shutil
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.database import Base, create_sqlite_engine
@@ -86,3 +87,55 @@ def test_forced_backups_do_not_overwrite_when_wall_clock_repeats(test_engine, tm
     assert len(set(paths)) == 7
     assert paths[-1].exists()
     assert len(list_sqlite_backups(test_engine)) == 5
+
+
+def test_backup_target_open_failure_releases_source_connection(test_engine, tmp_path, monkeypatch):
+    from app.services import growth_data
+
+    Base.metadata.create_all(test_engine)
+    monkeypatch.setenv("SGA_BACKUP_DIR", str(tmp_path / "backups"))
+    connect = sqlite3.connect
+    sources = []
+
+    def fail_target(database, *args, **kwargs):
+        if str(database).endswith(".tmp"):
+            raise sqlite3.OperationalError("target unavailable")
+        connection = connect(database, *args, **kwargs)
+        sources.append(connection)
+        return connection
+
+    monkeypatch.setattr(growth_data.sqlite3, "connect", fail_target)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="target unavailable"):
+            create_sqlite_backup(test_engine, force=True)
+        assert len(sources) == 1
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            sources[0].execute("SELECT 1")
+    finally:
+        for connection in sources:
+            connection.close()
+
+
+def test_failed_backup_removes_temporary_database(test_engine, tmp_path, monkeypatch):
+    from app.services import growth_data
+
+    Base.metadata.create_all(test_engine)
+    # Keep this failure-injection test independent of Windows path limits.
+    backup_root = tmp_path.parent / "cleanup-backups"
+    monkeypatch.setattr(growth_data, "_backup_dir", lambda engine: backup_root)
+    connect = sqlite3.connect
+
+    class FailedSource(sqlite3.Connection):
+        def backup(self, target, **kwargs):
+            raise sqlite3.OperationalError("backup interrupted")
+
+    def fail_backup(database, *args, **kwargs):
+        if kwargs.get("uri"):
+            kwargs["factory"] = FailedSource
+        return connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(growth_data.sqlite3, "connect", fail_backup)
+    with pytest.raises(sqlite3.OperationalError, match="backup interrupted"):
+        create_sqlite_backup(test_engine, force=True)
+    assert list(backup_root.rglob("*.tmp")) == []
+    assert list(backup_root.rglob("*.sqlite")) == []

@@ -69,6 +69,10 @@ def validate_business(db,kind,operations):
     for op in operations:
         if not isinstance(op,dict):error('INVALID_DRAFT','修改格式无效。',422)
         name=op.get('op')
+        from ..codex.chat_capabilities import RULE_OPS, validate_operation
+        if name in RULE_OPS or name=='work_timer':
+            validate_operation(db,kind,op)
+            continue
         if kind=='feedback':
             if set(op)-{'op','task_id','outcome','actual_minutes','remaining_minutes','reason','corrects_feedback_id','completed_at','occurred_at','family','goal_id','difficulty'}:
                 error('INVALID_DRAFT','反馈字段无效。',422)

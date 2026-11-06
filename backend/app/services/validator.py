@@ -99,7 +99,7 @@ def expand_time_rules(week_start: date, time_rules: Sequence[TimeRuleInput]) -> 
             if type(rule.date) is not date or rule.weekday is not None:
                 raise SchedulingInputError("INVALID_TIME_RULES", f"Once rule {rule.id} requires a date and no weekday.")
             occurrence = rule.date
-        if not rule.active or not week_start_at.date() <= occurrence < week_end_at.date():
+        if not rule.active or occurrence in rule.excluded_dates or not week_start_at.date() <= occurrence < week_end_at.date():
             continue
         intervals.append(RuleInterval(
             time_rule_id=rule.id,

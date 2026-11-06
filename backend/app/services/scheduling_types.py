@@ -37,6 +37,7 @@ class TimeRuleInput:
     weekday: int | None = None
     date: DateValue | None = None
     active: bool = True
+    excluded_dates: tuple[DateValue, ...] = ()
 
 
 @dataclass(frozen=True)

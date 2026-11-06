@@ -1,3 +1,4 @@
+import { loadJsx } from './codex/load-jsx.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createConversation, getConversations, getConversation, getConversationMessages, saveConversationMessage, updateConversation, deleteConversation } from '../src/api.js'
@@ -59,9 +60,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { readFile } from 'node:fs/promises'
 import { transformWithEsbuild } from 'vite'
 
-const menuSource=await readFile(new URL('../src/components/ConversationMenu.jsx',import.meta.url),'utf8')
-const compiledMenu=await transformWithEsbuild(`import React from '${import.meta.resolve('react')}';\n${menuSource.replace("from 'react'",`from '${import.meta.resolve('react')}'`).replace("from 'react-dom'",`from '${import.meta.resolve('react-dom')}'`)}`,'ConversationMenu.jsx',{jsx:'transform',jsxFactory:'React.createElement'})
-const {ConversationRow,menuPosition}=await import(`data:text/javascript;base64,${Buffer.from(compiledMenu.code).toString('base64')}`)
+const {ConversationRow,menuPosition}=await loadJsx(new URL('../src/components/ConversationMenu.jsx',import.meta.url))
 
 test('query results produce one truthful notice, preserving distinct errors and questions',()=>{
   assert.deepEqual(toolNotices([{tool:'tasks'},{tool:'calendar'},{tool:'tasks'}]),['已查询：任务、日程。'])

@@ -28,6 +28,7 @@
 .compact-shell.v2-shell {--ink:#243e35;--muted:#586c62;--line:#dee7e1;--accent:#176e58;--soft:#edf4ef;--surface:#fff;height:100dvh;min-height:480px;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);color:var(--ink)}
 .compact-shell.v2-shell .v2-grid {display:grid;grid-template-columns:76px var(--v2-list-width) minmax(360px,var(--v2-primary-fr)) 8px minmax(320px,var(--v2-auxiliary-fr));grid-template-rows:auto minmax(0,1fr);flex:1;min-height:0}
 .compact-shell.v2-shell[data-panel=collapsed] .v2-grid {grid-template-columns:76px var(--v2-list-width) minmax(0,1fr) 0 44px}
+.compact-shell.v2-shell:not([data-navigation=home])[data-panel] .v2-grid {grid-template-columns:76px 0 minmax(0,1fr) 0 0}
 .compact-shell.v2-shell[data-panel=expanded] .v2-grid {grid-template-columns:76px 0 280px 0 minmax(0,1fr)}
 .compact-shell.v2-shell .v2-navigation {grid-column:1;grid-row:1 / span 2;display:flex;flex-direction:column;padding:20px 8px 12px;border-right:1px solid #d9e4e7;min-width:0}
 .compact-shell.v2-shell .v2-brand {font-size:19px;font-weight:700;text-align:center;margin:4px 0 24px}

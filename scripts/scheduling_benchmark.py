@@ -71,7 +71,7 @@ def scenario(name):
 
 def run_case(name, profile_path=None):
     tasks, rules, previous, scope, feasibility = scenario(name)
-    canonical = dict(tasks=tasks, rules=[asdict(r) for r in rules], previous=previous, now=NOW.isoformat(), week=WEEK.isoformat())
+    canonical = dict(tasks=tasks, rules=[{k:v for k,v in asdict(r).items() if k!='excluded_dates' or v} for r in rules], previous=previous, now=NOW.isoformat(), week=WEEK.isoformat())
     input_hash = hashlib.sha256(json.dumps(canonical, sort_keys=True, default=str).encode()).hexdigest()
     strategy_runs = []
     original = scheduler._arrange_single

@@ -14,6 +14,43 @@ from app.services.claude_client import AIServiceError, ClaudeConfig, get_claude_
 CONFIG = ClaudeConfig("test-only-placeholder-secret", "configured-model", "https://gateway.example/", "2023-06-01")
 
 
+def test_deepseek_planner_requests_structured_json_without_changing_model(monkeypatch):
+    config = ClaudeConfig('placeholder', 'deepseek-flash', 'https://api.deepseek.com/v1', api_format='openai', thinking_effort='low')
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['response_format'] == {'type': 'json_object'}
+        assert body['model'] == 'deepseek-flash' and body['thinking']['type'] == 'enabled'
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': '{"calls":[]}'}}]})
+    mock_http(monkeypatch, handler)
+    assert asyncio.run(request_claude('JSON tools', 'Return JSON', config, json_mode=True)) == '{"calls":[]}'
+
+
+def test_app_session_reuses_transport_and_closes_it_on_exit(monkeypatch):
+    real_client = httpx.AsyncClient
+    clients = []
+    def handler(request):
+        body = json.loads(request.content)
+        if body.get('stream'):
+            return httpx.Response(200, headers={'content-type': 'text/event-stream'}, text='data: {"choices":[{"delta":{"content":"保持完整回答"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': '完整结果'}}]})
+    def factory(**kwargs):
+        instance = real_client(transport=httpx.MockTransport(handler), **kwargs)
+        clients.append(instance)
+        return instance
+    monkeypatch.setattr(claude_client.httpx, 'AsyncClient', factory)
+    config = ClaudeConfig('synthetic', 'same-model', 'https://offline.example', api_format='openai')
+    async def run():
+        async with claude_client.ai_client_session():
+            assert await request_claude('unchanged input', 'unchanged rules', config) == '完整结果'
+            events = [e async for e in claude_client.stream_claude('unchanged input', 'unchanged rules', config)]
+            assert ''.join(e.get('text', '') for e in events) == '保持完整回答'
+            assert len(clients) == 1 and not clients[0].is_closed
+        assert clients[0].is_closed
+        assert await request_claude('next lifecycle', 'same rules', config) == '完整结果'
+        assert len(clients) == 2 and clients[1].is_closed
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('model',['glm-5','glm-5.3-flash'])
 def test_glm_default_disables_thinking_without_expanding_paid_budget(model):
     config=ClaudeConfig('test-only',model,'https://gateway.example',api_format='openai')

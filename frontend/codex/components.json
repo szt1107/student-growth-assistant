@@ -1,0 +1,9 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": false,
+  "tailwind": { "config": "", "css": "src/codex/theme.css", "baseColor": "neutral", "cssVariables": true },
+  "iconLibrary": "lucide",
+  "aliases": { "components": "src/codex", "ui": "src/codex/ui", "utils": "src/codex/lib/utils", "lib": "src/codex/lib", "hooks": "src/codex" }
+}

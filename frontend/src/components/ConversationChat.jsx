@@ -1,40 +1,39 @@
+import { Alert } from '../codex/ui/controls.js'
+import { Button } from '../codex/ui/controls.js'
 import { useEffect, useRef, useState,lazy,Suspense } from 'react'
-import { getConversation, getConversationMessages, getConversationRuns, getConversationRun, startConversationRun, stopConversationRun, retryConversationRun, createReviewDraft, getWorkspaceDraft,ensureConversationRuntime } from '../api.js'
+import { getConversation, getConversationMessages, getConversationRuns, getConversationRun, startConversationRun, stopConversationRun, retryConversationRun, getWorkspaceDraft,ensureConversationRuntime } from '../api.js'
 import { applyReply, mergeMessages, requestGate, visibleChatMessages, toolNotices,messageResourceLinks } from '../workbench.js'
 import { localizedError } from '../localization.js'
 import EditRecovery, { useEditRecovery } from './EditRecovery.jsx'
 import ChatMessages from './ChatMessages.jsx'
-import { coordinateDrafts } from '../draftCoordination.js'
+import { coordinateDrafts, hasUnsavedDraft } from '../draftCoordination.js'
 import { DraftCard, draftEvent } from './WorkspaceDraft.jsx'
 import { reviewRange } from '../calendar.js'
-import ConversationSummary from './ConversationSummary.jsx'
 const MemoryCard=lazy(()=>import('./MemoryPanel.jsx').then(module=>({default:module.MemoryCard})))
 import SafeMessage from './SafeMessage.jsx'
+import ChatComposer from '../codex/ChatComposer.jsx'
 
 const statuses = { completed: '回复已完成', failed: '回复未正常结束，内容可能不完整', cancelled: '已停止生成', interrupted: '回复已中断，可重试' }
 
-export default function ConversationChat({ workspace, id, target, revision, onChanged, active = true, onNavigate, today, intent,onLocate }) {
+export default function ConversationChat({ workspace, id, target, revision, onChanged, active = true, onNavigate, today, intent,onLocate, initialMode = null }) {
   const [meta, setMeta] = useState(null), [messages, setMessages] = useState([]), [next, setNext] = useState(null)
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [run, setRun] = useState(null), [observing, setObserving] = useState(true), [reload, setReload] = useState(0)
-  const [unavailable, setUnavailable] = useState(false), [input, setInput] = useState({ text: '', requestId: null })
+  const [unavailable, setUnavailable] = useState(false), [input, setInput] = useState({ text: '', requestId: null, mode: initialMode })
   const [reviewDates,setReviewDates]=useState(()=>{const [start,end]=reviewRange(today||new Date().toISOString().slice(0,10),'week');return {start_date:start,end_date:end,period:'week'}})
-  const [reviewOpen,setReviewOpen]=useState(false),[intentPending,setIntentPending]=useState(null)
-  const [summaryTarget,setSummaryTarget]=useState(null)
-  const reviewRequest=useRef(null),seenIntent=useRef(null)
+  const [intentPending,setIntentPending]=useState(null)
+  const [draftSelection,setDraftSelection]=useState(null)
+  const seenIntent=useRef(null)
   useEffect(()=>{
     if(!intent||seenIntent.current===intent.key)return
     seenIntent.current=intent.key
-    setReviewDates({start_date:intent.range.start,end_date:intent.range.end,period:intent.range.period})
+    if(intent.range)setReviewDates({start_date:intent.range.start,end_date:intent.range.end,period:intent.range.period})
     setIntentPending(intent)
   },[intent])
-  const reviewRecovery=useEditRecovery({workspace,resource:`conversation:${id}:review-preview`,base:meta?`review-preview:${id}`:undefined,
-    value:{dates:reviewDates,request:reviewRequest.current,open:reviewOpen},dirty:reviewOpen||Boolean(reviewRequest.current),automatic:true,
-    restore:value=>{setReviewDates(value.dates);reviewRequest.current=value.request;setReviewOpen(Boolean(value.open))}})
   const toolSignature=useRef('')
   const gate = useRef(requestGate()), alive = useRef(true), locked = useRef(false), cursor = useRef({})
   const recovery = useEditRecovery({ workspace, resource: `conversation:${id}:input`, base: meta ? `${id}:${meta.scope}` : undefined,
-    value: input, dirty: Boolean(input.text), restore: value => setInput({ text: typeof value.text === 'string' ? value.text : '', requestId: value.requestId || null }), automatic: true })
+    value: input, dirty: Boolean(input.text), restore: value => setInput({ text: typeof value.text === 'string' ? value.text : '', requestId: value.requestId || null, mode: ['plan','review','profile'].includes(value.mode) ? value.mode : null }), automatic: true })
   useEffect(() => { alive.current = true; return () => { alive.current = false; gate.current.next() } }, [])
   function receive(response) {
     const signature=JSON.stringify(response.content?.tools||[])
@@ -43,7 +42,7 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
     setMessages(current => applyReply(current, response)); setRun(response); setError('')
   }
   useEffect(()=>{
-    if(input.requestId && run?.client_message_id===input.requestId) setInput({text:'',requestId:null})
+    if(input.requestId && run?.client_message_id===input.requestId) setInput(current=>({...current,text:'',requestId:null}))
   },[input.requestId,run?.client_message_id])
   useEffect(() => {
     if (!active) return
@@ -92,6 +91,12 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
   const [windowStart,setWindowStart]=useState(0)
   const displayMessages=visibleChatMessages(messages)
   const visibleMessages=displayMessages.slice(windowStart,windowStart+120)
+  const latestDraftKey=displayMessages.flatMap(message=>(message.content?.tools||[]).filter(result=>result.memory||result.draft).map((result,index)=>result.draft?`${message.id}:${index}`:null).filter(Boolean)).at(-1)
+  const selectedDraftKey=draftSelection&&draftSelection.latest===latestDraftKey?draftSelection.key:latestDraftKey
+  function selectDraft(key){
+    if(key!==selectedDraftKey&&hasUnsavedDraft()){setError('当前草案有未保存修改，请先保存后再切换草案。');return}
+    setDraftSelection({latest:latestDraftKey,key})
+  }
   async function loadMore(before = false) {
     if (locked.current || loading || unavailable) return
     locked.current = true; setBusy(true); setError('')
@@ -118,8 +123,8 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
   function send(event) {
     event.preventDefault()
     if (!input.text.trim() || !meta || unavailable || meta.archived_at || meta.scope !== 'conversation' || run?.status === 'running') return
-    const payload = { client_message_id: input.requestId || crypto.randomUUID(), text: input.text }
-    setInput({ text: input.text, requestId: payload.client_message_id })
+    const payload = { client_message_id: input.requestId || crypto.randomUUID(), text: input.text, mode: input.mode }
+    setInput({ ...input, requestId: payload.client_message_id })
     action(async () => {
       await ensureConversationRuntime()
       const draft_versions=await coordinateDrafts()
@@ -137,58 +142,43 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
       setMessages(current => mergeMessages(current, [{ id: response.user_message_id, session_id: id, role: 'user', text: payload.text }]))
       receive(response); setObserving(true)
       setWindowStart(current=>Math.max(current,displayMessages.length-118))
-      setInput(current => current.text === payload.text ? { text: '', requestId: null } : current)
+      setInput(current => current.text === payload.text ? { ...current, text: '', requestId: null } : current)
       onChanged()
     })
   }
-  return <section className="workspace-chat conversation-chat" aria-label="持久会话">
-    <div className="workspace-chat-heading"><h2 title={meta?.title}>{meta?.title || '读取会话'}</h2><div className="conversation-summary-trigger" ref={setSummaryTarget}/></div>
+  const empty = !loading && !error && !messages.length && meta?.scope === 'conversation'
+  return <section className="workspace-chat conversation-chat aui-thread" data-empty={empty} aria-label="持久会话">
     <p className="helper conversation-intro" title="相关历史与所需资料会发送给你配置的模型服务。">{meta?.scope && meta.scope !== 'conversation' ? '历史工具会话只读；业务草案请从对应入口处理。' : '从一个想法开始，重要修改由你确认。'}</p>
-    <div className="button-row conversation-shortcuts" role="group" aria-label="聊天业务入口">
-      <button className="button subtle" onClick={() => onNavigate?.({ page: 'schedule', kind: 'schedule' })}>日程与任务</button>
-      <button className="button subtle" onClick={() => onNavigate?.({ page: 'review', kind: 'review' })}>查看复盘</button>
-      <button className="button subtle" onClick={() => onNavigate?.({ page: 'profile', kind: 'profile' })}>目标与档案</button>
-    </div>
-    {intentPending&&<section className="recovery-note"><p>从回顾带入的讨论：{intentPending.text}</p><button className="button secondary" disabled={Boolean(input.text)} onClick={()=>{setInput({text:intentPending.text,requestId:null});setIntentPending(null)}}>填入聊天（不会自动发送）</button><button className="button subtle" onClick={()=>setIntentPending(null)}>保留当前输入</button></section>}
+    {intentPending&&<section className="recovery-note"><p>{intentPending.range?'从回顾带入的讨论':'从日程带入的讨论'}：{intentPending.text}</p><Button className="button secondary" disabled={Boolean(input.text)} onClick={()=>{setInput(current=>({...current,text:intentPending.text,requestId:null}));setIntentPending(null)}}>填入聊天（不会自动发送）</Button><Button className="button subtle" onClick={()=>setIntentPending(null)}>保留当前输入</Button></section>}
     {loading && <p role="status">正在读取会话…</p>}
-    {error && <p className="error-box" role="alert">{error}<button className="button subtle" onClick={() => setReload(value => value + 1)}>重新读取</button></p>}
+    {error && <Alert variant="destructive" role="alert">{error}<Button className="button subtle" onClick={() => setReload(value => value + 1)}>重新读取</Button></Alert>}
     {meta?.archived_at && !unavailable && <p role="status">当前会话已归档，请在会话栏恢复后再发送。</p>}
-    <EditRecovery recovery={recovery} label="聊天输入" /><EditRecovery recovery={reviewRecovery} label="复盘整理请求" />
-    <ConversationSummary workspace={workspace} id={id} active={active} unavailable={unavailable||meta?.scope!=='conversation'} onLocate={onLocate} triggerTarget={summaryTarget}/>
+    <EditRecovery recovery={recovery} label="聊天输入" />
     <ChatMessages storageKey={workspace?`sga-chat-scroll:${workspace}:${id}`:null} revision={`${windowStart}:${messages[0]?.id}:${messages.length}:${messages.at(-1)?.id}:${messages.at(-1)?.text?.length}`}>
       {!unavailable && <>
-        {messages.length > 0 && <button className="button subtle" disabled={busy || loading} onClick={() => loadMore(true)}>加载更早消息</button>}
-        {windowStart>0&&<button className="button subtle" onClick={()=>setWindowStart(Math.max(0,windowStart-100))}>显示前一段已加载消息</button>}
+        {windowStart>0&&<Button className="button subtle" onClick={()=>setWindowStart(Math.max(0,windowStart-100))}>显示前一段已加载消息</Button>}
         {visibleMessages.map(message => <article tabIndex={-1} id={`conversation-message-${id}-${message.id}`} key={message.id} className={`workspace-message ${message.role} ${target === message.id ? 'search-match' : ''}`}>
           <strong>{message.role === 'user' ? '我' : '成长助手'}</strong><SafeMessage text={message.text} />
           {message.content?.status && message.content.status !== 'completed' && message.id!==run?.assistant_message_id && <small>{statuses[message.content.status] || '正在生成…'}</small>}
-          {(message.content?.tools||[]).filter(result=>result.memory||result.draft).map((result,index)=>result.memory?<Suspense key={index} fallback={<p role="status">正在读取记忆建议…</p>}><MemoryCard id={result.memory.id} active={active} onOpen={onNavigate}/></Suspense>:<DraftCard key={index} reference={result.draft} active={active} onOpen={link=>onNavigate?.({...link,conversationId:id,messageId:message.id})}/>)}
+          {(message.content?.tools||[]).filter(result=>result.memory||result.draft).map((result,index)=>result.memory?<Suspense key={index} fallback={<p role="status">正在读取记忆建议…</p>}><MemoryCard id={result.memory.id} active={active} onOpen={onNavigate}/></Suspense>:<DraftCard key={index} reference={result.draft} active={active} workspace={workspace} expanded={selectedDraftKey===`${message.id}:${index}`} onOpen={()=>selectDraft(`${message.id}:${index}`)} onClose={()=>selectDraft(null)} onSaved={onChanged}/>)}
           {toolNotices(message.content?.tools,message.content?.questions).map(notice=><p className="helper" key={notice}>{notice}</p>)}
-          <div className="button-row">{messageResourceLinks(message.content?.links).map((link, i) => <button className="button subtle" key={i} onClick={() => onNavigate?.({...link,conversationId:id,messageId:message.id})}>{link.label}</button>)}</div>
+          {messageResourceLinks(message.content?.links).length>0&&<div className="button-row">{messageResourceLinks(message.content?.links).map((link, i) => <Button className="button subtle" key={i} onClick={() => onNavigate?.({...link,conversationId:id,messageId:message.id})}>{link.label}</Button>)}</div>}
         </article>)}
-        {windowStart+120<displayMessages.length&&<button className="button subtle" onClick={()=>setWindowStart(Math.max(0,displayMessages.length-120))}>显示最新已加载消息</button>}
-        {next !== null && <button className="button subtle" disabled={busy || loading} onClick={() => loadMore()}>加载后续消息</button>}
-        {!loading && !error && !messages.length && (meta?.scope==='conversation' ? <div className="conversation-welcome"><h3>想先聊些什么？</h3><p>说说眼前的事，或一起看看接下来的安排。</p></div> : <p className="growth-empty">还没有消息。</p>)}
+        {windowStart+120<displayMessages.length&&<Button className="button subtle" onClick={()=>setWindowStart(Math.max(0,displayMessages.length-120))}>显示最新已加载消息</Button>}
+        {next !== null && <Button className="button subtle" disabled={busy || loading} onClick={() => loadMore()}>加载后续消息</Button>}
+        {!loading && !error && !messages.length && meta?.scope!=='conversation' && <p className="growth-empty">还没有消息。</p>}
       </>}
     </ChatMessages>
-    {run && <section aria-label="回复状态" className="reply-status">
+    {run && ['failed','interrupted'].includes(run.status) && <section aria-label="回复状态" className="reply-status">
       <p role="status">{run.status === 'running' ? run.phase==='querying'?'正在查询正式记录…':run.phase==='calculating'?'正在计算待审核草案…':run.delivery === 'full' ? '服务使用完整回复模式，正在等待结果…' : run.delivery === 'streaming' ? '正在接收回复…' : '正在理解并读取必要上下文…' : run.status==='failed'&&run.content?.tools?.some(result=>result.draft)?'草案已生成；文字回复未正常结束，可重试':statuses[run.status]}</p>
       {run.error_code && <p role="alert">{run.content?.tools?.some(result=>result.draft)?'已保存的初稿与查询结果仍可查看；本次AI文字回复失败，重试不会重复创建正式任务。':localizedError(503, { code: run.error_code })}</p>}
-      {run.status === 'running' && <><button className="button subtle" disabled={busy} onClick={() => action(async () => { const response = await stopConversationRun(id, run.id, run.attempt); if (alive.current) receive(response) })} title="请求后台停止这次回复">停止生成</button>
-        <button className="button subtle" title="只暂停界面读取，后台回复继续" onClick={() => setObserving(value => !value)}>{observing ? '停止等待' : '继续读取'}</button></>}
-      {['failed', 'cancelled', 'interrupted'].includes(run.status) && <button className="button secondary" disabled={busy} onClick={() => action(async () => { await ensureConversationRuntime();const response = await retryConversationRun(id, run.id, run.attempt); if (alive.current) { receive(response); setObserving(true) } })}>重试回复</button>}
-      {!observing && run.status === 'running' && <p className="helper">已停止此界面的观察，后台回复可能继续；点击继续读取恢复。</p>}
+      {['failed', 'cancelled', 'interrupted'].includes(run.status) && <Button className="button secondary" disabled={busy} onClick={() => action(async () => { await ensureConversationRuntime();const response = await retryConversationRun(id, run.id, run.attempt); if (alive.current) { receive(response); setObserving(true) } })}>重试回复</Button>}
     </section>}
-    {meta?.scope==='conversation'&&<><button className="button subtle conversation-review-action" aria-expanded={reviewOpen} disabled={busy||loading||unavailable||Boolean(meta.archived_at)||run?.status==='running'} onClick={()=>setReviewOpen(!reviewOpen)}>整理为复盘记录</button>
-    {reviewOpen&&<form className="review-preview-form" onSubmit={event=>{event.preventDefault();action(async()=>{
-      reviewRequest.current ||= {...reviewDates,client_request_id:crypto.randomUUID(),message_id:messages.at(-1)?.id}
-      const result=await createReviewDraft(id,reviewRequest.current)
-      reviewRequest.current=null;setReviewOpen(false);setReload(v=>v+1)
-      onNavigate?.({page:'review',kind:'review_record',id:result.id,conversationId:id})
-    })}}><p className="helper">仅整理指定范围和当前讨论为可编辑草案，确认后才保存复盘，不会创建任务。</p><label>开始日期<input required type="date" value={reviewDates.start_date} onChange={e=>{reviewRequest.current=null;setReviewDates({...reviewDates,start_date:e.target.value})}}/></label><label>结束日期（不含）<input required type="date" value={reviewDates.end_date} onChange={e=>{reviewRequest.current=null;setReviewDates({...reviewDates,end_date:e.target.value})}}/></label><label>记录周期<select value={reviewDates.period} onChange={e=>{reviewRequest.current=null;setReviewDates({...reviewDates,period:e.target.value})}}><option value="day">日</option><option value="week">周</option><option value="month">月</option></select></label><button className="button secondary" disabled={busy}>生成可编辑预览</button></form>}</>}
-    <form className="workspace-chat-input" onSubmit={send}>
-      <label>会话输入<textarea aria-label="会话输入" value={input.text} maxLength={2000} disabled={busy || loading || !recovery.ready || unavailable || Boolean(meta?.archived_at) || meta?.scope !== 'conversation'} onChange={event => setInput({ text: event.target.value, requestId: null })} /></label>
-      <button className="button primary" disabled={busy || loading || !recovery.ready || unavailable || Boolean(meta?.archived_at) || meta?.scope !== 'conversation' || !input.text.trim() || run?.status === 'running'}>发送</button>
-    </form>
+    <footer className="aui-footer">
+      {empty&&<div className="aui-welcome"><h3>今天想从哪里开始？</h3></div>}
+      <ChatComposer active={active} value={input.text} maxLength={2000} mode={input.mode} onModeChange={mode=>setInput(current=>({...current,mode,requestId:null}))} onChange={event=>setInput(current=>({...current,text:event.target.value,requestId:null}))} onSubmit={send}
+        disabled={busy||loading||!recovery.ready||unavailable||Boolean(meta?.archived_at)||meta?.scope!=='conversation'} running={run?.status==='running'}
+        onStop={()=>action(async()=>{const response=await stopConversationRun(id,run.id,run.attempt);if(alive.current)receive(response)})}/>
+    </footer>
   </section>
 }

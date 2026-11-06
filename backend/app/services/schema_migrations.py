@@ -10,6 +10,7 @@ from .growth_data import create_sqlite_backup
 def upgrade_database(engine):
     config=Config()
     config.set_main_option('script_location', str(Path(__file__).resolve().parents[2]/'alembic'))
+    config.set_main_option('recursive_version_locations', 'true')
     head=ScriptDirectory.from_config(config).get_current_head()
     # Every real schema upgrade gets an online backup, independent of daily backups.
     if inspect(engine).get_table_names():

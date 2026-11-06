@@ -28,7 +28,7 @@ from . import ai_diagnostics as trace
 from .assistant_clock import assistant_now
 
 logger=logging.getLogger(__name__)
-RUNTIME_PROTOCOL='draft-recovery-v3'
+RUNTIME_PROTOCOL='chat-capabilities-v4'
 
 
 def call_key(call):
@@ -101,11 +101,13 @@ def execution_receipt(results, previous):
             lines.append('本次操作未完成：'+result.get('message','工具执行失败，请核对后重试。'))
     if not lines:return None
     if any(r.get('fallback') for r in results):lines.append('模型处理未完成，初稿使用了已知信息与标注的默认值。')
-    if any(d['status']!='applied' for d in drafts):lines.append('尚未保存正式修改，请在右侧辅助栏审核并明确确认。')
+    if any(d['status']!='applied' for d in drafts):lines.append('尚未保存正式修改，请展开聊天中的草案卡片审核并明确确认。')
     elif not drafts:lines.append('本轮没有修改正式任务或日程。')
     return '\n'.join(dict.fromkeys(lines))
-PLANNER='''工具选择协议：只返回符合schema的JSON，不输出解释。只能选择allowed_tools。
+PLANNER='''当前是工具选择阶段，不是面向用户的回答阶段。自然交流规范用于最终回答，此阶段严格只返回符合schema的JSON对象，不输出解释或对话。只能选择allowed_tools。
+无需工具时输出 {"calls":[],"questions":[],"continue_after_read":false}。查询示例：{"calls":[{"name":"tasks","arguments":{}}],"questions":[],"continue_after_read":false}。
 tasks/goals/memories使用lookup_schema的id/q/offset/limit；calendar/review使用start,end（上海日期，end不含）。日期工具优先按tool_schemas中的工具名查对应契约，不混用查询和草案字段。
+attention无参数，复用真实优先处理/空闲时段计算；time_rules使用lookup_schema查询课程和保护时间；task_execution使用lookup_schema，指定真实任务id读取反馈和计时状态，不带id查询当前活动计时。问先做什么先查attention；不能凭聊天猜优先级。课程规则不是普通记忆，profile_draft支持create_time_rule/update_time_rule。执行进度用feedback_draft，计时用其中work_timer。查询结果才能确定id时先读并continue_after_read=true，重名须询问，不猜id。
 planning_draft使用planning_schema；breakdown_draft使用breakdown_schema；review_draft使用review_schema。
 profile_draft/feedback_draft使用operations，遵守business_operations。edit_draft只引用已协调的current_drafts及kind/id/version/content，保留用户其它编辑。
 memory_suggestion使用memory_schema。没有权限时calls为空；缺必要字段只返回questions，不执行依赖答案的动作。
@@ -115,11 +117,18 @@ decision_feedback是服务端对未完成办事路径的一次纠正；不要重
 
 async def plan(request):
     from ..assistant_schemas import PreferencePatch
-    from ..schemas import GrowthGoalCreate,GrowthGoalPatch,TaskFeedbackCreate
+    from ..schemas import GrowthGoalCreate,GrowthGoalPatch,TaskFeedbackCreate,TimeRuleCreate,TimeRuleUpdate
     from .conversation_context import bounded_request
     request=bounded_request(request)
     selection=ai_skills.select_skills(request['message'],request.get('history',[]),request.get('current_drafts',[]))
     system,_=ai_skills.compose(selection,PLANNER)
+    from ..codex.composer_modes import with_mode
+    system = with_mode(system, request.get('mode'))
+    # The policy has already excluded every tool. Keep the skill checks, but
+    # do not spend a serial model request selecting from an empty tool set.
+    if not selection.allowed:
+        trace.record('tool_plan.skipped', reason='no_allowed_tools')
+        return ToolPlan()
     schema=ToolPlan.model_json_schema()
     if selection.allowed:schema['$defs']['ToolCall']['properties']['name']['enum']=sorted(selection.allowed)
     else:
@@ -133,26 +142,31 @@ async def plan(request):
         'edit_schema':EditToolArgs.model_json_schema(),'goal_patch_schema':GrowthGoalPatch.model_json_schema(),
         'preference_patch_schema':PreferencePatch.model_json_schema(),
         'business_operations':{'create_goal':'op plus goal_schema fields','update_goal':'op, goal_id, fields matching goal_patch_schema',
+            'create_time_rule':'op plus time_rule_schema fields；每天规则用7个weekly weekday 1..7；不得用ai_note替代硬占用',
+            'update_time_rule':'op, id from time_rules, fields matching time_rule_patch_schema；停用用active:false',
+            'work_timer':'feedback_draft中op:work_timer,task_id,action:start|pause|resume|finish；非start还须session_id=timer.id及expected_updated_at=timer.updated_at；查询无id时从active_timers中取同样字段。停止不表示任务完成',
             'record_feedback':'op, task_id plus feedback_schema fields except client_action_id (server generated)',
             'create_preference_rule':{'fields':'op, name, description?, kind, category_key?, weekdays?, parameters',
                 'parameters':{'prefer_time':'{start:HH:MM,end:HH:MM}','avoid_time':'{start:HH:MM,end:HH:MM}','deadline_buffer':'{hours:integer 0..72}','adjustment_mode':'{mode:balanced|preference|stable}','ai_note':'{text:string}' }},
             'update_preference_rule':'op, id, fields containing supported create_preference_rule fields or enabled',
             'set_preferences':'op, settings matching preference_patch_schema'},
         'lookup_schema':LookupArgs.model_json_schema(),'memory_schema':MemoryContent.model_json_schema(),'review_schema':ReviewToolArgs.model_json_schema(),
-        'goal_schema':GrowthGoalCreate.model_json_schema(),'feedback_schema':TaskFeedbackCreate.model_json_schema()}
+        'goal_schema':GrowthGoalCreate.model_json_schema(),'feedback_schema':TaskFeedbackCreate.model_json_schema(),
+        'time_rule_schema':TimeRuleCreate.model_json_schema(),'time_rule_patch_schema':TimeRuleUpdate.model_json_schema()}
     data['tool_schemas']={name:contract for name,contract in {
         'calendar':data['range_schema'],'review':data['range_schema'],
-        'review_draft':data['review_schema']}.items() if name in selection.allowed}
+        'review_draft':data['review_schema'],'time_rules':data['lookup_schema'],
+        'task_execution':data['lookup_schema'],'attention':{'type':'object','additionalProperties':False,'properties':{}}}.items() if name in selection.allowed}
     for key,tool in [('planning_schema','planning_draft'),('breakdown_schema','breakdown_draft'),('edit_schema','edit_draft'),
         ('memory_schema','memory_suggestion'),('review_schema','review_draft')]:
         if tool not in selection.allowed:data.pop(key,None)
     if 'planning_draft' not in selection.allowed:data.pop('schedule_preview_schema',None)
     if not selection.expected:data.pop('draft_defaults',None)
     if not selection.allowed.intersection({'profile_draft','feedback_draft'}):
-        for key in ('business_operations','goal_schema','goal_patch_schema','feedback_schema','preference_patch_schema'):data.pop(key,None)
-    serialized=json.dumps(data,ensure_ascii=False)
+        for key in ('business_operations','goal_schema','goal_patch_schema','feedback_schema','preference_patch_schema','time_rule_schema','time_rule_patch_schema'):data.pop(key,None)
+    serialized=json.dumps(data,ensure_ascii=False,separators=(',', ':'))
     if len(serialized)+len(system)>48000:raise claude_client.AIServiceError('AI_CONTEXT_TOO_LARGE')
-    raw=await claude_client.request_claude(serialized,system,claude_client.get_claude_config(),2400)
+    raw=await claude_client.request_claude(serialized,system,claude_client.get_claude_config(),2400,json_mode=True)
     from .constraint_parser import normalize_fence,unique_object,reject_constant
     try:
         parsed=json.loads(normalize_fence(raw),object_pairs_hook=unique_object,parse_constant=reject_constant)
@@ -209,6 +223,9 @@ def persist(engine,rid,token,**values):
 
 async def execute(db,run,call,index,*,fallback=False):
     name,args=call.name,call.arguments;key=f'tool:{run.id}:{index}'
+    from ..codex import chat_capabilities
+    if name in chat_capabilities.READ_TOOLS:
+        return chat_capabilities.read(db,name,args)
     if name=='memories':
         from .secretary import memory_data
         values=LookupArgs.model_validate(args)
@@ -317,13 +334,18 @@ async def execute(db,run,call,index,*,fallback=False):
         resolved=result.get('id',values.id) if isinstance(result,dict) and values.kind=='planning' else values.id
         return {'draft':{'kind':values.kind,'id':resolved},'summary':'已更新同一草案，仍须审核确认。'}
     values=BusinessArgs.model_validate(args);kind='profile' if name=='profile_draft' else 'feedback'
+    for operation in values.operations:
+        if kind=='profile' and operation.get('op')=='create_preference_rule' and operation.get('kind')=='ai_note' and any(w in run.text for w in ('有课','课表','保护时间','午休')):
+            error('TIME_RULE_REQUIRED','课程和保护时间须使用正式时间规则草案，不能以记忆或普通备注代替。',422)
     workspace_drafts.validate_business(db,kind,values.operations);db.rollback()
     with planning_transaction(db):
         existing=db.scalar(select(GrowthChangeDraft).where(GrowthChangeDraft.payload['tool_key'].as_string()==key))
         if existing:return {'draft':{'kind':kind,'id':existing.id},'summary':'已恢复原草案'}
         session=tool_session(db,run.session_id,'profile' if kind=='profile' else 'review')
+        labels={'create_time_rule':'新增课程或保护时间','update_time_rule':'调整课程或保护时间','work_timer':'计时操作','record_feedback':'记录执行情况'}
+        summary='；'.join(dict.fromkeys(labels.get(op.get('op'),'资料修改') for op in values.operations))
         draft=GrowthChangeDraft(session_id=session.id,scope=session.scope,status='ready',source_revision=revision(db),
-            payload={'operations':values.operations,'tool_key':key,'reply':'待你审核的修改','changes':[]})
+            payload={'operations':values.operations,'tool_key':key,'reply':summary,'changes':[]})
         db.add(draft);db.flush()
         return {'draft':{'kind':kind,'id':draft.id},'summary':'已生成待审核草案，没有保存正式资料。'}
 

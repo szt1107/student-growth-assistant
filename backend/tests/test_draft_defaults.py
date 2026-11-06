@@ -12,6 +12,12 @@ def test_chinese_work_minutes(text,minutes):
     assert draft_defaults.duration(text)==minutes
 
 
+@pytest.mark.parametrize('text', ['截止2026-10-2822:00', '截止2026-10-28 22:00'])
+def test_explicit_date_does_not_become_part_of_deadline_hour(text):
+    now = datetime.fromisoformat('2026-10-14T18:00:00+08:00')
+    assert draft_defaults.user_values(text, now)['deadline'] == '2026-10-28T22:00:00+08:00'
+
+
 @pytest.fixture
 def defaults_chat(client,monkeypatch):
     async def empty(request):return ToolPlan()
@@ -137,7 +143,7 @@ def test_defaults_priority_and_preference_provenance():
 
 def test_provider_invalid_json_reproduces_real_planner_failure_and_recovers(client,defaults_chat,monkeypatch):
     requests=[]
-    async def invalid(prompt,*args):requests.append(json.loads(prompt));return '{"calls": [{"name": "planning_draft"}'
+    async def invalid(prompt,*args,**kwargs):requests.append(json.loads(prompt));return '{"calls": [{"name": "planning_draft"}'
     monkeypatch.setattr(claude_client,'get_claude_config',lambda:None)
     monkeypatch.setattr(claude_client,'request_claude',invalid)
     monkeypatch.setattr(conversation_tools,'plan',real_plan)

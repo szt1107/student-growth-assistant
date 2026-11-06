@@ -12,7 +12,9 @@ from pathlib import Path
 from .claude_client import AIServiceError
 
 SKILL_ROOT = Path(__file__).resolve().parents[1] / 'skills'
-READ_TOOLS = frozenset({'tasks', 'goals', 'preferences', 'calendar', 'review', 'memories'})
+from ..codex.chat_intents import natural_operation, protection_request, READ_TOOLS as CHAT_READ_TOOLS
+
+READ_TOOLS = frozenset({'tasks', 'goals', 'preferences', 'calendar', 'review', 'memories'}) | CHAT_READ_TOOLS
 CAPABILITIES = {
     'schedule': READ_TOOLS | {'planning_draft', 'edit_draft'},
     'task': READ_TOOLS | {'planning_draft', 'breakdown_draft', 'profile_draft', 'feedback_draft', 'edit_draft'},
@@ -48,6 +50,9 @@ def active_text(text):
 
 
 def _operation(text):
+    natural = natural_operation(text)
+    if natural:
+        return natural
     if re.search(r'(删除|停用|忘掉|修改|更新|不再记住).*(记忆|习惯)|^(删除|停用|忘掉).*(偏好)', text):
         return 'manage_memory'
     if re.search(r'(创建|新建|新增|修改|调整|更新|生成|给我).*(目标|偏好|档案)|生成目标建议|希望.*(每周|周[一二三四五六日]).*(留空|避开)', text):
@@ -60,7 +65,7 @@ def _operation(text):
         return 'review'
     if re.search(r'(反馈|记录).*(完成|投入|分钟|执行)|修正执行|反馈草案|完成.{0,12}投入', text):
         return 'feedback'
-    if re.search(r'(安排|排程|排一下|排进|排到|规划|重排|重新排|调整.{0,8}计划|下周行动)', text):
+    if re.search(r'(安排|排程|排一下|排进|排到|(?<!动态)规划|重排|重新排|调整.{0,8}计划|下周行动)', text):
         return 'schedule'
     if re.search(r'(创建|新建|新增|修改|调整|更新).*(任务|作业)|^创建\d+分钟任务', text):
         return 'create_task'
@@ -71,18 +76,22 @@ def select_skills(text, history=(), current_drafts=()):
     current = active_text(text)
     if current!=text.strip() and (not current or re.search(r'是什么意思|怎么理解|这句话|这段话',current)):
         return Selection(('chat',),'chat',frozenset(),reason='quoted_discussion')
-    negative = any(re.search(r'(不要|别|不用|不想|不需要|无需|不必|暂不|暂时不|先不|不能|禁止).*(安排|规划|拆解|创建|生成|复盘|记住|记录|修改|更新|调整|改成|改为|删除)', clause)
+    negative = any(re.search(r'(不要|别|不用|不想|不需要|无需|不必|暂不|暂时不|先不|先别|不能|禁止).*(安排|规划|拆解|创建|生成|复盘|记住|记录|修改|更新|调整|改成|改为|设为|设置为|删除|暂停|停止|计时|加入)', clause) and not protection_request(clause)
         for clause in re.split(r'[，,。；;！？!?\n]',current))
-    hypothetical = bool(re.search(r'^(如果|假如|假设|举例|比如)|(?:如果|假如|假设).*(会怎样|会怎么样|会如何|是否可行)|(?:解释|分析).{0,8}(这句话|这段话)', current))
+    hypothetical = bool(re.search(r'^(如果|假如|假设|举例|比如)|(?:如果|假如|假设).*(会怎样|会怎么样|会如何|会不会|会否|是否可行|是否.{0,12}(冲突|影响))|(?:解释|分析).{0,8}(这句话|这段话)', current))
     readonly = bool(re.search(r'(只|仅)(想|要|是)?(查|看|问|了解)|看看|看一下|查一下|查询|最新任务|有什么|多少|在哪|忙不忙|是什么|记得', current))
     operation = _operation(current)
+    if re.search(r'是什么意思|什么叫|怎么理解|会怎么处理', current):
+        operation = None
+        readonly = True
     editing=False
-    followup = bool(re.search(r'(?:把|将|这份|当前|这个).{0,12}(草案|初稿|方案).{0,16}(改为|改成|修改|调整|更新|分成|分为)|(?:请|帮我|麻烦|^)(?:继续)?(?:修改|调整|更新).{0,8}(草案|初稿|方案)',current))
+    followup = bool(re.search(r'(?:把|将|这份|当前|这个).{0,12}(草案|初稿|方案).{0,16}(改为|改成|设为|设置为|修改|调整|更新|分成|分为)|(?:请|帮我|麻烦|^)(?:继续)?(?:修改|调整|更新).{0,8}(草案|初稿|方案)',current))
     if followup and not negative and not hypothetical:
         # Only server-read pending resources identify the kind being edited.
         # Model narration and the mere existence of an old draft grant no action.
         kinds={draft.get('kind') for draft in current_drafts if draft.get('status') in ('ready','needs_input','conflict','no_plan')}
         named='review_record' if '复盘' in current else 'planning' if re.search(r'日程|安排|时间|时长|分钟|小时|点|作业',current) else None
+        if re.search(r'课表|课程|保护时间|午休',current) and 'profile' in kinds:named='profile'
         if named in kinds:kinds={named}
         if len(kinds)>1:return Selection(('query',),'query',READ_TOOLS,reason='ambiguous_draft')
         if len(kinds)==1:
@@ -92,7 +101,7 @@ def select_skills(text, history=(), current_drafts=()):
         for item in list(history)[-8:][::-1]:
             if item.get('role')=='user':
                 prior=select_skills(item.get('text',''))
-                if prior.expected in ('planning','review_record'):
+                if prior.expected in ('planning','review_record','profile','feedback','breakdown'):
                     operation=prior.operation;break
                 if re.search(r'不安排|先不要|换个话题',item.get('text','')):break
     if negative or hypothetical:

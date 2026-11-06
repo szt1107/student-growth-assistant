@@ -5,20 +5,20 @@
 在项目根目录执行，先停止正在写入同一个数据库的服务：
 
 ```powershell
-conda run -n app_env python -m pip install -r backend/requirements.txt -c backend/constraints.txt
-conda run -n app_env python scripts/migrate.py
+python -m pip install -r backend/requirements.txt -c backend/constraints.txt
+python scripts/migrate.py
 ```
 
 正常默认库是 `backend/data/app.db`。指定其他本地库时，在同一终端设置路径：
 
 ```powershell
 $env:SGA_DATABASE_PATH = '你的数据库完整路径'
-conda run -n app_env python scripts/migrate.py
+python scripts/migrate.py
 ```
 
-启动 FastAPI 也调用同一升级入口。空库依次执行 `0001_baseline`、`0002_task_hierarchy`、`0003_conversations`、`0004_review_records`、`0005_secretary_memory`，当前 head 为 `0005_secretary_memory`。已有库先检查列、类型、主键、外键，仅接受已知旧结构，再补齐已知阶段字段和索引。成功才记录 Alembic 版本。重复执行不会重复导入任务或清空数据。达到 head 后仍检查模型字段与类型，不能靠一个版本号掩盖不匹配结构。
+启动 FastAPI 也调用同一升级入口。空库依次执行 `0001_baseline`、`0002_task_hierarchy`、`0003_conversations`、`0004_review_records`、`0005_secretary_memory`、`0006_calendar`，当前 head 为 `0006_calendar`。已有库先检查列、类型、主键、外键，仅接受已知旧结构，再补齐已知阶段字段和索引。成功才记录 Alembic 版本。重复执行不会重复导入任务或清空数据。达到 head 后仍检查模型字段与类型，不能靠一个版本号掩盖不匹配结构。
 
-V2 当前 JSON 导出为 **format_version=5**，包含会话、复盘记录和记忆。v1–v4 经严格验证后逐级转换；旧格式缺少当前数据时会拒绝可能丢失新版记录的恢复。相关规则与验收记录见 [V2 架构说明](v2/v2-architecture-proposal.md)。下文阶段 2 的 v1/v2 说明保留为该阶段的迁移背景。
+v2.2 当前 JSON 导出为 **format_version=6**，包含会话、复盘记录、记忆和日历事项。v1–v5 经校验后兼容导入；旧格式缺少当前数据时会拒绝可能丢失新版记录的恢复。相关规则与验收记录见 [V2 架构说明](v2/v2-architecture-proposal.md)。下文阶段 2 的 v1/v2 说明保留为该阶段的迁移背景。
 
 ## 备份和失败处理
 
@@ -40,7 +40,7 @@ V2 当前 JSON 导出为 **format_version=5**，包含会话、复盘记录和�
 
 迁移目录位于 `backend/alembic`；`baseline_models.py` 是冻结的基线，不随业务模型变化而修改。新增结构应增加新的 revision，并先验证空库、旧库、重复升级和失败备份。`growth_migrations` 保留既有数据初始化和历史转换；应用启动不再直接调用旧建表／加列流程。
 
-本次目录整理仅搬迁 Alembic 资源并修复路径，三个冻结文件保持原字节内容，没有增加 revision、修改 Schema、改变导出格式或在个人库上执行验证。旧本地演示路径仍兼容，新演示默认写入 scripts/.runtime。
+v2.2 的 `0006_calendar` 添加本地日历事项和幂等写入记录。历史迁移文件用于重建旧版本结构，当前演示默认写入 `scripts/.runtime/`。
 
 ## 阶段 2 增量迁移与 JSON 兼容
 

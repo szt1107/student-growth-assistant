@@ -1,3 +1,6 @@
+import { Alert, Badge } from '../codex/ui/controls.js'
+import { useConfirmation } from '../codex/ui/confirmation-provider.jsx'
+import { Button, Input, Textarea, NativeSelect, Label } from '../codex/ui/controls.js'
 import { useEffect,useRef,useState } from 'react'
 import { getWorkspaceDraft,editWorkspaceDraft,actWorkspaceDraft } from '../api.js'
 import { registerEditor,editableDraft,canConfirmDraft,previewCompletionDeadline } from '../draftCoordination.js'
@@ -15,6 +18,8 @@ fieldLabels.fixed_start='指定开始时间'
 fieldLabels.splittable='允许分段'
 fieldLabels.min_block_minutes='最小分段分钟'
 fieldLabels.max_segments='最多分段数'
+Object.assign(fieldLabels,{start_time:'开始时间',end_time:'结束时间',date:'指定日期',weekday:'星期',recurrence:'重复方式',kind:'时间类型',active:'启用规则'})
+const operationLabels={create_time_rule:'新增课程或保护时间',update_time_rule:'修改课程或保护时间',work_timer:'计时操作',record_feedback:'执行反馈建议',create_goal:'目标建议',add:'新增任务建议'}
 const sourceLabels={user_explicit:'你提供',conversation_context:'前文提供',confirmed_preference:'已确认偏好',system_default:'系统默认，可修改',unresolved:'未设置',formal_task:'正式任务'}
 export function PreviewDetails({draft}){
   const value=draft?.content?.schedule
@@ -22,26 +27,33 @@ export function PreviewDetails({draft}){
     {draft?.unresolved?.map(note=><p className="recovery-note" key={note}>{note}</p>)}{draft?.notices?.filter((note,index,all)=>all.indexOf(note)===index).map(note=><p className="helper" key={note}>{note}</p>)}</>
 }
 function ScheduleFields({value,onChange}){
-  return <><Fields value={{title:value.title,duration_minutes:value.duration_minutes,deadline:value.deadline,priority:value.priority}} onChange={next=>onChange({...value,...next})}/><div className="form-grid"><label>希望完成日期<input type="date" value={value.day} onChange={e=>onChange({...value,day:e.target.value})}/></label><label>建议开始时间<input type="time" step="300" value={value.start_time} onChange={e=>onChange({...value,start_time:e.target.value,start_exact:true})}/></label><label>工作分段数<input type="number" min="1" max="8" value={value.segments} onChange={e=>onChange({...value,segments:Number(e.target.value)})}/></label><label>段间休息分钟<input type="number" min="0" max="120" step="5" value={value.break_minutes} onChange={e=>onChange({...value,break_minutes:Number(e.target.value)})}/></label></div></>
+  return <><Fields value={{title:value.title,duration_minutes:value.duration_minutes,deadline:value.deadline,priority:value.priority}} onChange={next=>onChange({...value,...next})}/><div className="form-grid"><Label>希望完成日期<Input type="date" value={value.day} onChange={e=>onChange({...value,day:e.target.value})}/></Label><Label>建议开始时间<Input type="time" step="300" value={value.start_time} onChange={e=>onChange({...value,start_time:e.target.value,start_exact:true})}/></Label><Label>工作分段数<Input type="number" min="1" max="8" value={value.segments} onChange={e=>onChange({...value,segments:Number(e.target.value)})}/></Label><Label>段间休息分钟<Input type="number" min="0" max="120" step="5" value={value.break_minutes} onChange={e=>onChange({...value,break_minutes:Number(e.target.value)})}/></Label></div></>
 }
 function Fields({value,onChange}){
   return <div className="form-grid">{Object.entries(value).map(([key,item])=>{
+    if(key==='action'&&value.op==='work_timer')return <p key={key}>计时操作：{{start:'开始',pause:'暂停',resume:'继续',finish:'结束'}[item]}（不会自动完成任务）</p>
+    if(key==='task_id')return <p key={key}>关联任务 #{item}</p>
+    if(key==='id'&&value.op==='update_time_rule')return <p key={key}>时间规则 #{item}</p>
+    if(key==='session_id'&&value.op==='work_timer')return <p key={key}>计时记录 #{item}</p>
     if(['fields','parameters','settings','profile'].includes(key)&&item&&typeof item==='object')return <Fields key={key} value={item} onChange={next=>onChange({...value,[key]:next})}/>
     if(['metric_kind','goal_type','status','adjustment_mode','mode','priority'].includes(key)){
       const options=key==='metric_kind'?[['time','投入时长'],['count','次数'],['deliverable','成果物']]:key==='goal_type'?[['long_term','长期'],['stage','阶段']]:key==='status'?[['active','进行中'],['paused','暂停'],['completed','已完成'],['archived','归档']]:key==='priority'?(typeof item==='number'?[[1,'最优先'],[2,'重要'],[3,'保持推进']]:[['high','高'],['normal','普通'],['low','低']]):[['balanced','兼顾'],['preference','习惯优先'],['stable','稳定优先']]
-      return <label key={key}>{fieldLabels[key]||'安排取舍'}<select value={item} onChange={e=>onChange({...value,[key]:typeof item==='number'?Number(e.target.value):e.target.value})}>{options.map(([v,label])=><option key={v} value={v}>{label}</option>)}</select></label>
+      return <Label key={key}>{fieldLabels[key]||'安排取舍'}<NativeSelect value={item} onChange={e=>onChange({...value,[key]:typeof item==='number'?Number(e.target.value):e.target.value})}>{options.map(([v,label])=><option key={v} value={v}>{label}</option>)}</NativeSelect></Label>
     }
-    if(key==='enabled'||key==='splittable')return <label key={key}>{fieldLabels[key]||'启用'}<input type="checkbox" checked={Boolean(item)} onChange={e=>onChange({...value,[key]:e.target.checked})}/></label>
-    if(key==='outcome')return <label key={key}>执行结果<select value={item} onChange={e=>onChange({...value,[key]:e.target.value})}><option value="completed">完成</option><option value="partial">部分完成</option><option value="postponed">暂缓</option></select></label>
+    if(key==='enabled'||key==='splittable'||key==='active')return <Label key={key}>{fieldLabels[key]||'启用'}<Input type="checkbox" checked={Boolean(item)} onChange={e=>onChange({...value,[key]:e.target.checked})}/></Label>
+    if(key==='recurrence'||key==='kind'&&['course','protected'].includes(item))return <p key={key}>{fieldLabels[key]}：{{weekly:'每周',once:'单次',course:'课程',protected:'保护时间'}[item]}{key==='recurrence'?'（调整重复方式请继续告诉助手）':''}</p>
+    if(key==='weekday')return <Label key={key}>星期<NativeSelect value={item??''} onChange={e=>onChange({...value,weekday:Number(e.target.value)})}>{['一','二','三','四','五','六','日'].map((day,i)=><option key={day} value={i+1}>星期{day}</option>)}</NativeSelect></Label>
+    if(key==='start_time'||key==='end_time'||key==='date')return <Label key={key}>{fieldLabels[key]}<Input type={key==='date'?'date':'time'} value={item||''} onChange={e=>onChange({...value,[key]:e.target.value})}/></Label>
+    if(key==='outcome')return <Label key={key}>执行结果<NativeSelect value={item} onChange={e=>onChange({...value,[key]:e.target.value})}><option value="completed">完成</option><option value="partial">部分完成</option><option value="postponed">暂缓</option></NativeSelect></Label>
     if(!fieldLabels[key]||item&&typeof item==='object')return null
     const number=['duration_minutes','weekly_target','actual_minutes','remaining_minutes','hours'].includes(key)||typeof item==='number'
     const date=key==='deadline'||key==='fixed_start'
-    return <label key={key}>{fieldLabels[key]}{['summary','conclusion','next_steps','description','motivation','reason'].includes(key)?<textarea aria-label={fieldLabels[key]} value={item||''} onChange={e=>onChange({...value,[key]:e.target.value})}/>:<input type={date?'datetime-local':key==='due_date'?'date':number?'number':'text'} value={date?toDatetimeLocalValue(item):item??''} onChange={e=>onChange({...value,[key]:date?(e.target.value?toBackendDeadline(e.target.value):null):number?(e.target.value===''?null:Number(e.target.value)):e.target.value})}/>}</label>
+    return <Label key={key}>{fieldLabels[key]}{['summary','conclusion','next_steps','description','motivation','reason'].includes(key)?<Textarea aria-label={fieldLabels[key]} value={item||''} onChange={e=>onChange({...value,[key]:e.target.value})}/>:<Input type={date?'datetime-local':key==='due_date'?'date':number?'number':'text'} value={date?toDatetimeLocalValue(item):item??''} onChange={e=>onChange({...value,[key]:date?(e.target.value?toBackendDeadline(e.target.value):null):number?(e.target.value===''?null:Number(e.target.value)):e.target.value})}/>}</Label>
   })}</div>
 }
 
 export function ReviewFields({value,onChange,sidebar=false}){
-  return <><label>标题<input required maxLength={160} value={value.title} onChange={e=>onChange({...value,title:e.target.value})}/></label>{[['summary','回顾摘要'],['conclusion','我的结论'],['next_steps','下一步（可空）']].map(([key,label])=><label key={key}>{label}<textarea aria-label={label} rows={sidebar?(key==='summary'?6:4):undefined} maxLength={key==='next_steps'?4000:6000} value={value[key]||''} onChange={e=>onChange({...value,[key]:e.target.value})}/></label>)}</>
+  return <><Label>标题<Input required maxLength={160} value={value.title} onChange={e=>onChange({...value,title:e.target.value})}/></Label>{[['summary','回顾摘要'],['conclusion','我的结论'],['next_steps','下一步（可空）']].map(([key,label])=><Label key={key}>{label}<Textarea aria-label={label} rows={sidebar?(key==='summary'?6:4):undefined} maxLength={key==='next_steps'?4000:6000} value={value[key]||''} onChange={e=>onChange({...value,[key]:e.target.value})}/></Label>)}</>
 }
 
 function ReviewPeriod({value}){
@@ -56,6 +68,7 @@ function ReviewReading({value}){
 }
 
 export default function WorkspaceDraft({workspace,kind,id,onSaved,onClose}){
+  const confirmAction = useConfirmation()
   const [draft,setDraft]=useState(null),[value,setValue]=useState(null),[dirty,setDirty]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false),[remote,setRemote]=useState(null)
   const [readRetry,setReadRetry]=useState(0),[loading,setLoading]=useState(true)
   const current=useRef(null);current.current={draft,value,dirty}
@@ -103,7 +116,7 @@ export default function WorkspaceDraft({workspace,kind,id,onSaved,onClose}){
   }
   async function act(action){
     if(busy)return
-    if(action==='discard'&&dirty&&!window.confirm('放弃这份草案及未保存的修改？'))return
+    if(action==='discard'&&dirty&&!await confirmAction('放弃这份草案及未保存的修改？'))return
     setBusy(true);setError('')
     try{
       // Explicit abandonment never requires invalid local fields to be saved.
@@ -118,30 +131,30 @@ export default function WorkspaceDraft({workspace,kind,id,onSaved,onClose}){
       adopt(next);draftEvent();if(action==='confirm')onSaved?.()
     }catch(cause){setError(cause.message);getWorkspaceDraft(kind,current.current?.draft?.id||id).then(setRemote).catch(()=>{})}finally{setBusy(false)}
   }
-  const saveButton=<button className="button secondary" disabled={busy||!dirty||!editable} onClick={()=>{setBusy(true);save().catch(()=>{}).finally(()=>setBusy(false))}}>保存草案编辑</button>
-  const confirmButton=<button className="button primary" disabled={busy||!canConfirmDraft(draft,dirty)} onClick={()=>act('confirm')}>{kind==='planning'?'确认采用方案':'确认正式保存'}</button>
-  return <section className={`workspace-draft panel${review?' review-draft':''}`} aria-label="共享草案编辑器" data-status={draft?.status}><div className="section-heading"><h2>{draftLabels[kind]}{review?<span className="review-draft-status" role="status">{statusLabels[draft?.status]||'读取中'}</span>:<> · {statusLabels[draft?.status]||'读取中'}</>}</h2><button className="button subtle" disabled={busy} onClick={()=>{if(dirty)setError('有未保存修改，请保存或保留缓存后再关闭。');else onClose?.()}}>关闭草案</button></div>
-    {error&&<p className="error-box" role="alert">{error}</p>}<EditRecovery recovery={recovery} label="共享草案编辑"/>
-    {remote&&<details open className="recovery-note"><summary>服务端最新内容（本地编辑仍保留）</summary>{kind==='review_record'?<ReviewReading value={remote.content}/>:<fieldset disabled>{remote.content.schedule?<Fields value={remote.content.schedule}/>:<>{(remote.content.operations||remote.content.actions||[]).map((op,index)=><Fields key={index} value={op}/>)}</>}</fieldset>}<button onClick={()=>{if(window.confirm('用服务端版本替换编辑器？本地内容请先保留对照。'))adopt(remote)}}>读取服务器版本</button></details>}
+  const saveButton=<Button className="button secondary" disabled={busy||!dirty||!editable} onClick={()=>{setBusy(true);save().catch(()=>{}).finally(()=>setBusy(false))}}>保存草案编辑</Button>
+  const confirmButton=<Button className="button primary" disabled={busy||!canConfirmDraft(draft,dirty)} onClick={()=>act('confirm')}>{kind==='planning'?'确认采用方案':'确认正式保存'}</Button>
+  return <section className={`workspace-draft panel${review?' review-draft':''}`} aria-label="共享草案编辑器" data-status={draft?.status}><div className="section-heading"><h2>{draftLabels[kind]}{review?<Badge className="review-draft-status" role="status">{statusLabels[draft?.status]||'读取中'}</Badge>:<> · {statusLabels[draft?.status]||'读取中'}</>}</h2><Button className="button subtle" disabled={busy} onClick={()=>{if(dirty)setError('有未保存修改，请保存或保留缓存后再关闭。');else onClose?.()}}>关闭草案</Button></div>
+    {error&&<Alert variant="destructive" role="alert">{error}</Alert>}<EditRecovery recovery={recovery} label="共享草案编辑"/>
+    {remote&&<details open className="recovery-note"><summary>服务端最新内容（本地编辑仍保留）</summary>{kind==='review_record'?<ReviewReading value={remote.content}/>:<fieldset disabled>{remote.content.schedule?<Fields value={remote.content.schedule}/>:<>{(remote.content.operations||remote.content.actions||[]).map((op,index)=><Fields key={index} value={op}/>)}</>}</fieldset>}<Button onClick={async()=>{if(await confirmAction('用服务端版本替换编辑器？本地内容请先保留对照。'))adopt(remote)}}>读取服务器版本</Button></details>}
     {draft&&value?savedReview?<>
       <ReviewReading value={value}/>
       {draft.notices?.length>0&&<details className="review-draft-notices"><summary>整理说明</summary><PreviewDetails draft={draft}/></details>}
       <p className="review-draft-receipt">可在复盘页的记录中查看；任务和日程不受影响。</p>
     </>:<>{!review&&<p className="helper">{draft.summary} · {statusLabels[draft.status]||draft.status} {dirty?'· 有未保存修改':''}</p>}{review&&dirty&&<p className="review-draft-unsaved" role="status">有未保存修改</p>}
       <PreviewDetails draft={draft}/>
-      {editable&&value.schedule&&!value.schedule.deadline&&<div className="draft-confirm-help"><p>确认前请填写截止时间，也可以明确选择以本次安排结束时间为截止。</p><button className="button secondary" disabled={busy||!previewCompletionDeadline(draft)} onClick={useCompletionDeadline}>以安排结束时间作为截止</button></div>}
+      {editable&&value.schedule&&!value.schedule.deadline&&<div className="draft-confirm-help"><p>确认前请填写截止时间，也可以明确选择以本次安排结束时间为截止。</p><Button className="button secondary" disabled={busy||!previewCompletionDeadline(draft)} onClick={useCompletionDeadline}>以安排结束时间作为截止</Button></div>}
       <fieldset disabled={busy||!editable} className="draft-editor-fields">
       {kind==='breakdown'?<BreakdownEditor content={value} expected={value.children.reduce((sum,c)=>sum+Number(c.duration_minutes||0),0)} onChange={change}/>:
         value.schedule?<ScheduleFields value={value.schedule} onChange={schedule=>change({schedule})}/>:
         kind==='review_record'?<><ReviewPeriod value={value}/><ReviewFields value={value} onChange={change} sidebar/></>:
-        <>{(value.operations||value.actions||[]).map((op,index)=><section className="draft-operation" key={index}><h3>{op.op==='add'?'新增任务建议':kind==='planning'?'任务安排建议':op.op==='record_feedback'?'执行反馈建议':op.op==='create_goal'?'目标建议':'资料修改建议'}</h3><Fields value={op} onChange={next=>{const key=kind==='planning'?'actions':'operations';change({...value,[key]:value[key].map((old,i)=>i===index?next:old)})}}/></section>)}</>}
-      </fieldset>{kind==='planning'&&draft.items.length>0&&<details open><summary>{draft.status==='applied'?'已采用安排':'候选安排 · 尚未正式采用'}</summary>{draft.items.map((item,index)=><p key={index}>{item.title} · {toDatetimeLocalValue(item.start_at).replace('T',' ')} 至 {toDatetimeLocalValue(item.end_at).replace('T',' ')}</p>)}</details>}<div className={`button-row${review?' review-draft-actions':''}`}>{review&&confirmButton}{saveButton}{!review&&confirmButton}<button className="button subtle" disabled={busy||draft.status==='applied'} onClick={()=>act('discard')}>放弃草案</button></div>
+        <>{(value.operations||value.actions||[]).map((op,index)=><section className="draft-operation" key={index}><h3>{operationLabels[op.op] || (kind==='planning'?'任务安排建议':'资料修改建议')}</h3><Fields value={op} onChange={next=>{const key=kind==='planning'?'actions':'operations';change({...value,[key]:value[key].map((old,i)=>i===index?next:old)})}}/></section>)}</>}
+      </fieldset>{kind==='planning'&&draft.items.length>0&&<details open><summary>{draft.status==='applied'?'已采用安排':'候选安排 · 尚未正式采用'}</summary>{draft.items.map((item,index)=><p key={index}>{item.title} · {toDatetimeLocalValue(item.start_at).replace('T',' ')} 至 {toDatetimeLocalValue(item.end_at).replace('T',' ')}</p>)}</details>}<div className={`button-row${review?' review-draft-actions':''}`}>{review&&confirmButton}{saveButton}{!review&&confirmButton}<Button className="button subtle" disabled={busy||draft.status==='applied'} onClick={()=>act('discard')}>放弃草案</Button></div>
       {draft.receipt&&<p role="status">保存结果：已正式保存。{kind==='planning'?'任务与日程已刷新。':kind==='review_record'?'可在复盘记录中查看。':'可到对应页面查看。'}</p>}<p className="helper">{draft.status==='applied'?'这份草案已经保存。如需调整，请基于最新正式记录生成新的草案。':review?'保存编辑仅暂存草案，确认后才存入复盘记录，不改变任务或日程。':'保存编辑仍是草案；只有确认后才写入正式业务。旧卡片与冲突版本无法直接执行。'}</p>
-    </>:loading?<p role="status">正在读取草案…</p>:<button className="button secondary" onClick={()=>setReadRetry(v=>v+1)}>重试读取草案</button>}
+    </>:loading?<p role="status">正在读取草案…</p>:<Button className="button secondary" onClick={()=>setReadRetry(v=>v+1)}>重试读取草案</Button>}
   </section>
 }
 
-export function DraftCard({reference,active,onOpen}){
+export function DraftCard({reference,active,onOpen,workspace,expanded=false,onClose,onSaved}){
   const [current,setCurrent]=useState(null),[error,setError]=useState('')
   useEffect(()=>{
     if(!active)return
@@ -149,5 +162,5 @@ export function DraftCard({reference,active,onOpen}){
     const read=()=>getWorkspaceDraft(reference.kind,reference.id).then(next=>{if(alive)setCurrent(next)}).catch(cause=>{if(alive)setError(cause.message)})
     read();window.addEventListener('sga-drafts-changed',read);return()=>{alive=false;window.removeEventListener('sga-drafts-changed',read)}
   },[reference.kind,reference.id,active])
-  return <section className="workspace-draft" data-draft-kind={reference.kind} data-draft-id={reference.id}><strong>{draftLabels[reference.kind]} · {statusLabels[current?.status]||'读取中'}</strong><p>{current?.summary||reference.summary}</p><PreviewDetails draft={current}/>{error&&<p role="alert">{error}</p>}{current&&<button className="button secondary" onClick={()=>onOpen({page:reference.kind==='review_record'?'review':reference.kind==='profile'?'profile':'schedule',kind:reference.kind,id:current.replacement_id||current.id})}>查看最新草案</button>}</section>
+  return <section className="workspace-draft" data-draft-kind={reference.kind} data-draft-id={reference.id}><strong>{draftLabels[reference.kind]} · {statusLabels[current?.status]||'读取中'}</strong><p>{current?.summary||reference.summary}</p>{error&&<p role="alert">{error}</p>}{expanded&&workspace?<WorkspaceDraft workspace={workspace} kind={reference.kind} id={current?.replacement_id||reference.id} onSaved={onSaved} onClose={onClose}/>:<><PreviewDetails draft={current}/>{current&&<Button className="button secondary" onClick={()=>onOpen({page:reference.kind==='review_record'?'review':reference.kind==='profile'?'profile':'schedule',kind:reference.kind,id:current.replacement_id||current.id})}>查看最新草案</Button>}</>}</section>
 }

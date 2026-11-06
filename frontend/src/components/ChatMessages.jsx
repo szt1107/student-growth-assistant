@@ -1,3 +1,4 @@
+import { Button } from '../codex/ui/controls.js'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { nearBottom } from '../workbench.js'
 
@@ -44,6 +45,6 @@ export default function ChatMessages({ children, revision, className = '',storag
       if (follow.current) setUnread(false)
       if(storageKey&&initialized.current)try{sessionStorage.setItem(storageKey,JSON.stringify({top:scroll.current.scrollTop,anchor:anchor.current,first_id:Number(anchor.current?.id.split('-').at(-1))||null}))}catch{/* optional scroll preference */}
     }}>{children}</div>
-    {unread && <button className="button subtle new-reply" type="button" onClick={bottom}>有新回复</button>}
+    {unread && <Button className="button subtle new-reply" type="button" onClick={bottom}>有新回复</Button>}
   </div>
 }

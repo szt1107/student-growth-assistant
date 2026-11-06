@@ -50,7 +50,7 @@ def create_run(db, conversation_id, payload):
         previous = db.scalar(select(AssistantRun).where(AssistantRun.session_id == conversation_id,
             AssistantRun.client_message_id == payload.client_message_id))
         if previous:
-            if previous.text != payload.text or previous.payload.get('kind') != 'conversation':
+            if previous.text != payload.text or previous.payload.get('kind') != 'conversation' or previous.payload.get('mode') != getattr(payload, 'mode', None):
                 error('IDEMPOTENCY_CONFLICT', '该发送标识已用于其他内容。')
             return run_data(db, previous), False
         if db.scalar(select(AssistantRun.id).where(AssistantRun.session_id == conversation_id, AssistantRun.status == 'running')):
@@ -65,7 +65,7 @@ def create_run(db, conversation_id, payload):
             db.add(user); db.flush()
         run = AssistantRun(session_id=conversation_id, client_message_id=payload.client_message_id,
             text=payload.text, source_revision=0, payload={'kind': 'conversation', 'attempt': 1,
-                'user_message_id': user.id, 'token': uuid4().hex,
+                'user_message_id': user.id, 'token': uuid4().hex, 'mode': getattr(payload, 'mode', None),
                 'draft_versions':[r.model_dump() for r in getattr(payload,'draft_versions',[])],
                 'review_range':getattr(payload,'review_range',None).model_dump(mode='json') if getattr(payload,'review_range',None) else None})
         db.add(run); db.flush()
@@ -87,7 +87,9 @@ def context_for(db,run):
 async def reply_events(request):
     from .ai_skills import select_skills,compose
     system,_=compose(select_skills(request['message'],request.get('history',[]),request.get('current_drafts',[])),SYSTEM)
-    async for event in claude_client.stream_claude(json.dumps(request, ensure_ascii=False), system, claude_client.get_claude_config()):
+    from ..codex.composer_modes import with_mode
+    system = with_mode(system, request.get('mode'))
+    async for event in claude_client.stream_claude(json.dumps(request, ensure_ascii=False, separators=(',', ':')), system, claude_client.get_claude_config()):
         yield event
 
 

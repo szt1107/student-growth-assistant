@@ -1,3 +1,4 @@
+import { loadJsx } from './codex/load-jsx.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -7,9 +8,7 @@ import { transformWithEsbuild } from 'vite'
 import { visibleSchedule } from '../src/assistant.js'
 import { replanAssistant, expandAssistantScope, discardAssistant, confirmAssistant } from '../src/api.js'
 
-const source=await readFile(new URL('../src/components/ScopedChanges.jsx',import.meta.url),'utf8')
-const compiled=await transformWithEsbuild(`import React from '${import.meta.resolve('react')}';\n${source.replace('../assistant.js',new URL('../src/assistant.js',import.meta.url).href)}`,'ScopedChanges.jsx',{jsx:'transform',jsxFactory:'React.createElement'})
-const {default:ScopedChanges}=await import(`data:text/javascript;base64,${Buffer.from(compiled.code).toString('base64')}`)
+const {default:ScopedChanges}=await loadJsx(new URL('../src/components/ScopedChanges.jsx',import.meta.url))
 const interval=(start,end)=>({start_at:`2026-10-05T${start}:00+08:00`,end_at:`2026-10-05T${end}:00+08:00`})
 const proposal={status:'ready',replanning:{mode:'local'},change_groups:{counts:{preserved:1,moved:1,added:0,pending:0},preserved:[{ref:'task:2',title:'阅读',before_segments:[interval('12:00','13:00')],after_segments:[interval('12:00','13:00')]}],moved:[{ref:'task:1',title:'报告',before_segments:[interval('09:00','10:00')],after_segments:[interval('10:00','10:30'),interval('11:00','11:30')],reasons:[{code:'TIME_RULE_CONFLICT',message:'报告与临时课程重叠。'}]}]}}
 const render=p=>renderToStaticMarkup(React.createElement(ScopedChanges,p))

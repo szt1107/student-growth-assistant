@@ -1,3 +1,4 @@
+import { loadJsx } from './codex/load-jsx.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -9,10 +10,7 @@ import { chartBars, minutesText, percentText, signedText } from '../src/analytic
 import { getGrowthStatistics } from '../src/api.js'
 
 const path = new URL('../src/components/GrowthAnalytics.jsx', import.meta.url)
-const source = await readFile(path, 'utf8')
-const imports = source.replace(/from '(\.\.\/[^']+)'/g, (_, relative) => `from '${new URL(relative, path).href}'`).replace("from 'react'", `from '${import.meta.resolve('react')}'`)
-const compiled = await transformWithEsbuild(`import React from '${import.meta.resolve('react')}';\n${imports}`, 'GrowthAnalytics.jsx', { jsx: 'transform', jsxFactory: 'React.createElement' })
-const { default: GrowthAnalytics, AnalyticsContent, AnalyticsState, WeeklyChart } = await import(`data:text/javascript;base64,${Buffer.from(compiled.code).toString('base64')}`)
+const { default: GrowthAnalytics, AnalyticsContent, AnalyticsState, WeeklyChart } = await loadJsx(path)
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props))
 const week = { start_date: '2026-12-28', end_date_exclusive: '2027-01-04', planned_task_count: 2, planned_minutes: 120, completed_count: 1, partial_task_count: 0, feedback_count: 1, known_actual_minutes: 90, actual_minutes: 90, unknown_actual_count: 0, completion_rate: null, cancelled_event_count: null, data_state: 'complete' }
 const estimation = { sample_count: 1, minimum_samples: 3, status: 'insufficient_data', estimated_minutes: 60, actual_minutes: 90, difference_minutes: 30, deviation_ratio: .5, overrun_count: 1, completed_candidates: 1, excluded_unknown_time: 0, excluded_incomparable_estimate: 0, categories: [], tasks: [], task_detail_limit: 20 }
@@ -21,7 +19,7 @@ const data = { weeks: 4, start_date: '2026-12-07', end_date_exclusive: '2027-01-
 test('overview, trends and category tables render API values with units and explicit limits', () => {
   const html = render(AnalyticsContent, { data })
   for (const text of ['计划任务', '2 项', '确认完成', '1 项', '120 分钟', '90 分钟', '当前已取消（全库）', '暂无可靠分母', '最近 4 周趋势', '自定义工程', '100.0%', '北京时间', '结束日不含', '每周真实记录', '不重复累计计时器']) assert.ok(html.includes(text), text)
-  assert.ok(html.includes('<svg'))
+  assert.ok(html.includes('每周确认完成按周查看'))
   assert.ok(html.includes('<caption>类别投入与确认完成</caption>'))
 })
 
@@ -92,7 +90,7 @@ test('chart gaps, zero and incomplete known effort are truthful and keyboard acc
   const bars = chartBars([week, unknown, partial, { ...week, actual_minutes: 0 }], 'actual_minutes')
   assert.deepEqual(bars.map(bar => bar.value), [90, null, 30, 0])
   const html = render(WeeklyChart, { weekly: [week, unknown, partial], metric: 'actual_minutes', title: '实际投入', unit: '分钟' })
-  for (const text of ['role="img"', 'tabindex="0"', '<title>', '≥30', '—', '2027-01-04', 'stroke-dasharray="3 2"']) assert.ok(html.includes(text), text)
+  for (const text of ['role="img"', '<button', 'aria-pressed="false"', '≥30', '—', '2027-01-04', '已知至少30分钟', '耗时未知或无反馈']) assert.ok(html.includes(text), text)
 })
 
 test('chart calendar labels and values remain identical in different browser timezones', () => {

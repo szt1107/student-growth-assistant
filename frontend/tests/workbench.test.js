@@ -1,3 +1,4 @@
+import { loadJsx } from './codex/load-jsx.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { nearBottom, reviewMetrics, progressPercent, initialWorkbench, workbenchReducer, workbenchVisibility, workbenchPanel, toolPlacement, defaultSplitRatio, clampSplitRatio, readSplitRatio, renderedSplitRatio, splitBounds, workspaceClock, shiftPreviewDate } from '../src/workbench.js'
@@ -58,7 +59,7 @@ test('collapsing the shared auxiliary pane gives primary tools the available spa
     assert.equal(toolPlacement(state, page), 'primary')
     assert.deepEqual(workbenchVisibility(state, false), { conversations: false, primary: true, auxiliary: false })
     state = workbenchReducer(state, { type: 'panel', value: 'normal' })
-    assert.equal(workbenchVisibility(state, false).auxiliary, true)
+    assert.equal(workbenchVisibility(state, false).auxiliary, false)
     assert.equal(state.splitRatio, 0.64)
     assert.equal(state.auxiliaryPage, 'review')
   }
@@ -83,14 +84,14 @@ test('expanded auxiliary pane temporarily hides the conversation list without ch
   }
 })
 
-test('mobile has exactly one surface and auxiliary switching cannot change the primary page', () => {
-  let state = workbenchReducer(initialWorkbench, { type: 'navigate', page: 'review' })
+test('mobile home has exactly one surface and auxiliary switching cannot change the primary page', () => {
+  let state = initialWorkbench
   for (const value of ['conversations', 'primary', 'auxiliary']) {
     state = workbenchReducer(state, { type: 'mobile', value })
     const visible = workbenchVisibility(state, true)
     assert.equal(Object.values(visible).filter(Boolean).length, 1)
     assert.equal(visible[value], true)
-    assert.equal(state.navigation, 'review')
+    assert.equal(state.navigation, 'home')
   }
   assert.equal(workbenchPanel(state), 'normal')
 })
@@ -134,9 +135,7 @@ test('unknown primary page, auxiliary page, size or mobile surface cannot corrup
   }
 })
 
-const shellSource = await readFile(new URL('../src/components/WorkspaceShell.jsx', import.meta.url), 'utf8')
-const compiledShell = await transformWithEsbuild(`import React from '${import.meta.resolve('react')}';\n${shellSource.replace("from 'react'", `from '${import.meta.resolve('react')}'`).replace('../workbench.js', new URL('../src/workbench.js', import.meta.url).href)}`, 'WorkspaceShell.jsx', { jsx: 'transform', jsxFactory: 'React.createElement' })
-const { default: WorkspaceShell } = await import(`data:text/javascript;base64,${Buffer.from(compiledShell.code).toString('base64')}`)
+const {default:WorkspaceShell}=await loadJsx(new URL('../src/components/WorkspaceShell.jsx',import.meta.url))
 const renderShell = state => renderToStaticMarkup(React.createElement(WorkspaceShell, { state, dispatch: () => {}, conversationContent: 'REAL_CONVERSATION_LIST', chat: 'CHAT', review: 'REVIEW', profile: 'PROFILE', clock: '演示 · 2026-10-14 18:00 北京时间' }, 'SCHEDULE'))
 
 test('shell exposes exactly three linked tabs, real current conversation and honest unavailable controls', () => {
@@ -157,27 +156,32 @@ test('primary calendar hides chat while keeping the common auxiliary controls', 
   assert.match(html, /id="v2-page-schedule"[^>]*data-placement="primary"[^>]*role="main"/)
   assert.match(html, /id="v2-page-review"[^>]*hidden="" inert=""/)
   assert.match(html, /id="v2-page-profile"[^>]*hidden="" inert=""/)
-  assert.ok(html.includes('恢复默认宽度'))
 })
 
-test('a draft is mounted once in the auxiliary pane while the primary page remains selected',()=>{
+test('a draft is mounted once in the main chat rather than the auxiliary pane',()=>{
   for(const navigation of ['home','schedule','review','profile']){
     const state={...initialWorkbench,navigation,auxiliaryPage:'schedule'}
     const html=renderToStaticMarkup(React.createElement(WorkspaceShell,{state,dispatch:()=>{},draftPage:'schedule',draftPanel:'SHARED_DRAFT_EDITOR',auxiliarySchedule:'DAY_PREVIEW'},'FULL_CALENDAR'))
     const auxiliary=html.slice(html.indexOf('id="v2-auxiliary-shared"'))
-    assert.ok(auxiliary.includes('SHARED_DRAFT_EDITOR'))
+    const chat=html.slice(html.indexOf('id="v2-chat"'),html.indexOf('class="v2-resizer"'))
+    assert.ok(chat.includes('SHARED_DRAFT_EDITOR'))
+    assert.ok(!auxiliary.includes('SHARED_DRAFT_EDITOR'))
     assert.equal((html.match(/SHARED_DRAFT_EDITOR/g)||[]).length,1)
-    assert.match(auxiliary, /id="v2-draft-preview" tabindex="-1">SHARED_DRAFT_EDITOR/)
-    assert.match(auxiliary, /<div hidden="" inert="">DAY_PREVIEW/)
+    assert.match(chat, /id="v2-draft-preview" tabindex="-1">SHARED_DRAFT_EDITOR/)
+    assert.match(auxiliary, /<div>DAY_PREVIEW/)
     assert.ok(html.includes(`data-navigation="${navigation}"`))
   }
 })
 
-test('each desktop primary page exposes the same accessible width separator and reset control', () => {
+test('only home with an open auxiliary pane exposes a width separator', () => {
   for (const page of ['home', 'schedule', 'review', 'profile']) {
-    const html = renderShell(workbenchReducer(initialWorkbench, { type: 'navigate', page }))
-    assert.match(html, /class="v2-resizer" role="separator" tabindex="0" aria-label="调整主体与辅助栏宽度" aria-orientation="vertical"/)
-    assert.ok(html.includes('恢复默认宽度'))
+    const html = renderShell(workbenchReducer({...initialWorkbench,panel:'normal'}, { type: 'navigate', page }))
+    if(page==='home') assert.match(html, /class="v2-resizer" role="separator" tabindex="0" aria-label="调整主体与辅助栏宽度" aria-orientation="vertical"/)
+    else {
+      assert.match(html, /class="v2-resizer"[^>]*hidden="" inert=""/)
+      assert.match(html, /id="v2-workspace"[^>]*hidden="" inert=""/)
+      assert.match(html, /class="v2-mobile-switch"[^>]*hidden="" inert=""/)
+    }
     assert.equal((html.match(/aria-label="辅助栏页签"/g) || []).length, 1)
   }
 })
@@ -221,7 +225,7 @@ test('every main page has its own full tool and an always minimal auxiliary host
   for (const navigation of ['home', 'schedule', 'review', 'profile']) {
     const state = { ...initialWorkbench, navigation, auxiliaryPage: 'schedule' }
     const html = renderToStaticMarkup(React.createElement(WorkspaceShell, { state, dispatch: () => {}, auxiliarySchedule: 'SINGLE_DAY_PREVIEW' }, 'FULL_WEEK_CALENDAR'))
-    assert.match(html, /id="v2-auxiliary-shared"[^>]*role="tabpanel"[^>]*aria-labelledby="v2-tab-schedule">/)
+    assert.match(html, /id="v2-auxiliary-shared"[^>]*role="tabpanel"[^>]*hidden="" inert=""/)
     assert.ok(html.includes('SINGLE_DAY_PREVIEW'))
     for (const page of ['schedule', 'review', 'profile']) {
       assert.equal(toolPlacement(state, page), navigation === page ? 'primary' : 'hidden')
@@ -230,22 +234,29 @@ test('every main page has its own full tool and an always minimal auxiliary host
   }
 })
 
-test('four main headings share one clock and only the auxiliary header owns collapse controls', () => {
+test('all pages share one clock in the workspace toolbar and one auxiliary toggle', () => {
   for (const page of ['home', 'schedule', 'review', 'profile']) {
     const html = renderShell({ ...initialWorkbench, navigation: page })
-    assert.equal((html.match(/演示 · 2026-10-14 18:00 北京时间/g) || []).length, 4)
-    assert.equal((html.match(/aria-label="收起辅助栏"/g) || []).length, 1)
+    assert.equal((html.match(/dateTime="2026-10-14T18:00:00\+08:00"/g) || []).length, 1)
+    assert.match(html, /class="v2-topbar" role="banner" aria-label="工作台工具栏"/)
+    assert.equal((html.match(/id="v2-toggle-workspace"/g) || []).length, 1)
+    assert.match(html, /id="v2-toggle-workspace"[^>]*aria-expanded="false" aria-controls="v2-auxiliary-shared"/)
     for (const [heading] of html.matchAll(/<header class="v2-primary-page-heading">.*?<\/header>/g)) assert.ok(!heading.includes('<button'))
   }
 })
 
-test('workspace navigation uses consistent decorative SVGs and leaves one home heading', () => {
+test('workspace navigation includes a brand sidebar toggle without a collapsed strip', () => {
   const html = renderShell(initialWorkbench)
   const navigation = html.match(/<nav class="v2-navigation".*?<\/nav>/s)[0]
-  assert.equal((navigation.match(/<svg /g) || []).length, 4)
-  assert.equal((navigation.match(/aria-hidden="true"/g) || []).length, 4)
+  assert.equal((navigation.match(/<svg /g) || []).length, 5)
+  assert.equal((navigation.match(/aria-hidden="true"/g) || []).length, 5)
+  assert.match(navigation,/class="[^"]*\bv2-brand-toggle\b[^"]*"/)
+  const collapsed=renderShell({...initialWorkbench,conversations:false})
+  assert.match(collapsed,/--v2-list-width:0px/)
+  assert.match(collapsed,/id="v2-conversations"[^>]*hidden="" inert=""/)
+  assert.ok(!collapsed.includes('id="v2-toggle-conversations"'))
   assert.ok(!html.includes('class="eyebrow"'))
-  assert.match(html, /<header class="v2-chat-heading"><h1>首页<\/h1>/)
+  assert.match(html, /<header class="v2-chat-heading"><h1 class="sr-only">首页<\/h1>/)
   for (const label of ['首页', '日程', '复盘', '档案']) assert.ok(navigation.includes(label))
 })
 

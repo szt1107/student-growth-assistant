@@ -1,0 +1,78 @@
+/* Adapted from assistant-ui ChatGPT (MIT). See LICENSE.assistant-ui.txt. */
+.compact-shell.v2-shell .v2-chat {background:var(--surface);color:var(--ink);padding:20px 28px 0}
+.compact-shell.v2-shell .v2-chat-heading {margin-bottom:12px}
+.compact-shell.v2-shell .v2-chat-heading h1 {font-size:22px;font-weight:600;color:var(--ink)}
+.compact-shell.v2-shell .v2-navigation>.v2-brand-toggle {position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;width:60px;height:64px;min-height:64px;padding:6px;margin:0;border:0;background:transparent;border-radius:8px;color:var(--accent);cursor:pointer}
+.v2-brand-symbol {position:relative;display:grid;place-items:center;width:42px;height:22px;margin:2px 0 4px}
+.v2-brand-label {font-size:16px;font-weight:600;line-height:22px}
+.v2-brand-caption {font-size:13px;font-weight:400;line-height:1.65;color:var(--muted);opacity:0}
+.v2-brand-toggle:hover .v2-brand-caption,.v2-brand-toggle:focus-visible .v2-brand-caption {opacity:1}
+.compact-shell.v2-shell .v2-brand-toggle .v2-brand-icon {position:absolute;inset:0;margin:auto;width:22px;height:22px;opacity:0}
+.v2-brand-toggle:hover .v2-brand-label,.v2-brand-toggle:focus-visible .v2-brand-label {opacity:0}
+.compact-shell.v2-shell .v2-brand-toggle:hover .v2-brand-icon,.compact-shell.v2-shell .v2-brand-toggle:focus-visible .v2-brand-icon {opacity:1}
+.compact-shell.v2-shell .v2-navigation>.v2-brand-toggle:hover {background:var(--soft)}
+.compact-shell.v2-shell .aui-thread {display:flex;flex-direction:column;flex:1;min-height:0;width:100%;background:var(--surface);color:var(--ink);padding:0;box-shadow:none;border:0}
+.compact-shell.v2-shell .aui-thread .workspace-chat-heading {flex-shrink:0;max-width:800px;width:100%;margin:0 auto;padding:0 8px}
+.compact-shell.v2-shell .aui-thread .workspace-chat-heading h2 {font-size:14px;color:var(--muted);font-weight:400;line-height:1.5}
+.compact-shell.v2-shell .aui-thread .conversation-intro {display:none}
+.compact-shell.v2-shell .aui-thread .conversation-summary-button {color:var(--muted)}
+.compact-shell.v2-shell .aui-thread .chat-history {min-height:0;flex:1;display:flex;flex-direction:column;margin:0}
+.compact-shell.v2-shell .aui-thread .chat-scroll {min-height:100px;height:0;flex:1;overflow-y:auto;padding:32px max(0px,calc((100% - 768px)/2)) 24px;gap:28px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.compact-shell.v2-shell .aui-thread .workspace-message {width:100%;max-width:100%;font-size:16px;line-height:1.8;color:var(--ink)}
+.compact-shell.v2-shell .aui-thread .workspace-message.user {align-self:flex-end;width:fit-content;max-width:76%;background:var(--soft);color:var(--ink);border:1px solid var(--line);border-radius:18px;padding:10px 18px;margin-left:auto}
+.compact-shell.v2-shell .aui-thread .workspace-message.assistant {align-self:stretch;padding:0;background:transparent;border:0}
+.compact-shell.v2-shell .aui-thread .workspace-message.assistant>strong {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.compact-shell.v2-shell .aui-thread .workspace-message>.safe-message {margin:0;display:flow-root}
+.compact-shell.v2-shell .aui-thread .workspace-message>.safe-message>:is(p,ul,ol,pre) {margin:0;line-height:1.8}
+.compact-shell.v2-shell .aui-thread .workspace-message>.safe-message>:is(p,ul,ol,pre)+:is(p,ul,ol,pre) {margin-top:10px}
+.compact-shell.v2-shell .aui-thread .workspace-message>.safe-message li {margin:0}
+.compact-shell.v2-shell .aui-thread .workspace-message>.safe-message pre {background:var(--soft);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;white-space:pre}
+.compact-shell.v2-shell .aui-thread .workspace-message>.safe-message code {font-size:.92em;white-space:pre-wrap;overflow-wrap:anywhere}
+.compact-shell.v2-shell .aui-thread .workspace-message>.safe-message pre code {white-space:pre;overflow-wrap:normal}
+.compact-shell.v2-shell .aui-thread .workspace-message.user :is(p,li,strong,a) {color:inherit}
+.compact-shell.v2-shell .aui-thread .workspace-message.user pre {color:var(--ink);background:var(--surface);border-color:var(--line)}
+.compact-shell.v2-shell .aui-footer {position:sticky;bottom:0;z-index:2;flex-shrink:0;display:flex;flex-direction:column;gap:8px;background:var(--surface);width:100%;max-width:768px;margin:0 auto;padding:12px 0 max(12px,env(safe-area-inset-bottom))}
+.compact-shell.v2-shell .aui-composer {display:flex;flex-direction:column;gap:10px;width:100%;margin:0;padding:16px 14px 10px;border:1px solid var(--line);border-radius:28px;background:var(--surface);box-shadow:none;transition:border-color .15s}
+.compact-shell.v2-shell .aui-composer:focus-within {border-color:var(--accent)}
+.compact-shell.v2-shell .aui-composer textarea {width:100%;min-height:28px;max-height:180px;resize:none;border:0;border-radius:0;outline:none;box-shadow:none;padding:0 6px;color:var(--ink);background:transparent;font:inherit;font-size:16px;line-height:26px;overflow-y:auto}
+.compact-shell.v2-shell .aui-composer textarea:focus-visible {outline:none}
+.compact-shell.v2-shell .aui-composer textarea::placeholder {color:var(--muted)}
+.compact-shell.v2-shell .aui-composer textarea:disabled {opacity:.65}
+.aui-composer-toolbar {display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px}
+.aui-composer-tools {display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;padding-left:4px}
+.aui-composer-actions {display:flex;align-items:center;gap:8px;flex-shrink:0}
+.compact-shell.v2-shell .aui-mic {display:flex;align-items:center;justify-content:center;width:36px;height:36px;min-height:36px;padding:8px;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer}
+.aui-mic svg {width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.compact-shell.v2-shell .aui-mic:hover:not(:disabled),.compact-shell.v2-shell .aui-mic[aria-pressed=true] {background:var(--soft);color:var(--accent)}
+.compact-shell.v2-shell .aui-mic:disabled {opacity:.45;cursor:default}
+.aui-voice-status {color:var(--muted);font-size:12px;line-height:1.5}
+.compact-shell.v2-shell .aui-send {width:36px;height:36px;min-height:36px;flex-shrink:0;border:0;border-radius:50%;padding:7px;background:var(--accent);color:var(--surface);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s}
+.compact-shell.v2-shell .aui-send:hover:not(:disabled) {filter:brightness(.92)}
+.compact-shell.v2-shell .aui-send:disabled {background:var(--soft);color:var(--muted);cursor:default;opacity:.6}
+.aui-send svg {width:22px;height:22px;color:inherit}
+.compact-shell.v2-shell .aui-footer-note {margin:0;text-align:center;font-size:12px;line-height:1.6;color:var(--muted)}
+.compact-shell.v2-shell .aui-thread .conversation-shortcuts {justify-content:center;border:0;gap:8px;padding:0;margin:10px 0 0}
+.compact-shell.v2-shell .aui-thread .conversation-shortcuts .button {border:1px solid var(--line);background:var(--surface);border-radius:20px;color:var(--muted);padding:7px 14px;min-height:36px;font-size:13px;font-weight:400}
+.compact-shell.v2-shell .aui-thread .conversation-shortcuts .button:hover {background:var(--soft);color:var(--accent)}
+.compact-shell.v2-shell .aui-thread[data-empty=true] .chat-history {display:none}
+.compact-shell.v2-shell .aui-thread[data-empty=true] .aui-footer {position:static;margin:auto auto;padding-bottom:14vh;gap:20px}
+.aui-welcome {text-align:center;margin:0 0 8px;padding:0}
+.aui-welcome h3 {font-size:28px!important;line-height:1.4;font-weight:500!important;margin:0 0 12px!important;letter-spacing:normal;color:var(--ink)}
+.aui-welcome p {font-size:14px;line-height:1.7;color:var(--muted);margin:0}
+.compact-shell.v2-shell .aui-thread[data-empty=true] .aui-footer-note {display:none}
+.compact-shell.v2-shell .aui-thread .reply-status {width:100%;max-width:768px;margin:0 auto;font-size:12px;max-height:90px;overflow:auto}
+.compact-shell.v2-shell .aui-thread .conversation-review-action {max-width:768px;width:100%;margin:0 auto;text-align:left;color:var(--muted);font-size:12px;min-height:28px}
+.compact-shell.v2-shell .aui-thread .review-preview-form {width:100%;max-width:768px;margin:0 auto;max-height:35vh;overflow:auto;flex-shrink:0}
+.compact-shell.v2-shell .v2-chat-surface {min-height:0}
+.compact-shell.v2-shell .aui-thread .workspace-message .workspace-draft {max-width:100%}
+@media(max-width:1023px){
+ .compact-shell.v2-shell .v2-navigation>.v2-brand-toggle {display:none}
+ .compact-shell.v2-shell .v2-chat {padding:12px 12px 0}
+ .compact-shell.v2-shell .aui-thread {min-height:0}
+ .compact-shell.v2-shell .aui-thread .chat-scroll {padding:20px 4px;gap:24px}
+ .compact-shell.v2-shell .aui-thread .workspace-message.user {max-width:90%}
+ .compact-shell.v2-shell .aui-thread[data-empty=true] .aui-footer {padding-bottom:8vh}
+ .aui-welcome h3 {font-size:24px!important}
+ .compact-shell.v2-shell .aui-composer textarea {font-size:16px}
+}
+@media(prefers-reduced-motion:reduce){.compact-shell.v2-shell :is(.aui-send,.aui-composer){transition:none}}

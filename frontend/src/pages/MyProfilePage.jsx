@@ -1,3 +1,9 @@
+import '../codex/profile.css'
+import { restoreProfileLocation, activeGoals } from '../codex/profile.js'
+import { Alert } from '../codex/ui/controls.js'
+import { Tabs, TabsList, TabsTrigger } from '../codex/ui/tabs.jsx'
+import { useConfirmation } from '../codex/ui/confirmation-provider.jsx'
+import { Button, Input, Textarea, NativeSelect, Label } from '../codex/ui/controls.js'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -28,9 +34,11 @@ function describeRule(rule) {
 }
 
 export default function MyProfilePage({ active = true, refreshVersion = 0, auxiliaryTarget = null, recoveryWorkspace, onDataChanged, onBusinessChat, onReturnChat, resource, onOpenConversation, primaryActive=active }) {
-  const [section,setSection]=useState('preferences'),[memoryVisited,setMemoryVisited]=useState(false)
+  const confirmAction = useConfirmation()
+  const [section,setSection]=useState('goals'),[memoryVisited,setMemoryVisited]=useState(false)
+  const [managementGroup,setManagementGroup]=useState(null)
   const sectionRecovery=useEditRecovery({workspace:recoveryWorkspace,resource:'profile-section',base:recoveryWorkspace?'profile-sections-v1':undefined,
-    value:{section},dirty:true,automatic:true,restore:value=>{if(['goals','time','preferences','memories','data'].includes(value.section)){setSection(value.section);if(value.section==='memories')setMemoryVisited(true)}}})
+    value:{section:section==='more'&&managementGroup?managementGroup:section},dirty:true,automatic:true,restore:value=>{const next=restoreProfileLocation(value);setSection(next.section);setManagementGroup(next.group);if(next.section==='memories')setMemoryVisited(true)}})
   useEffect(()=>{if(resource?.kind==='memory'){setSection('memories');setMemoryVisited(true)}},[resource?.requestKey])
   const [profile, setProfile] = useState(null)
   const [goals, setGoals] = useState([])
@@ -53,6 +61,9 @@ export default function MyProfilePage({ active = true, refreshVersion = 0, auxil
   const [notice, setNotice] = useState('')
   const [backups, setBackups] = useState([])
   const [courseVisited,setCourseVisited]=useState(false)
+  const [backupError,setBackupError]=useState(''),[backupLoading,setBackupLoading]=useState(false)
+  async function loadBackups(){setBackupLoading(true);setBackupError('');try{const data=await getLocalBackups();setBackups(data.backups||[])}catch(e){setBackupError(e.message)}finally{setBackupLoading(false)}}
+  useEffect(()=>{if(active&&section==='more'&&managementGroup==='data')loadBackups();if(section==='more'&&managementGroup==='time')setCourseVisited(true)},[active,section,managementGroup])
   const recovery=useEditRecovery({workspace:recoveryWorkspace,resource:'profile-editors',
     base:loading||previewError?undefined:JSON.stringify({goals,rules,categories}),
     value:{goalForm:Object.fromEntries(Object.keys(emptyGoal).map(key=>[key,goalForm[key]])),editingGoalId,showGoalEditor,ruleForm,editingRuleId,showRuleEditor,categoryName,editingCategoryKey},
@@ -63,10 +74,10 @@ export default function MyProfilePage({ active = true, refreshVersion = 0, auxil
     }})
 
   async function load() {
-    let snapshot,backupData
-    try { [snapshot,backupData]=await Promise.all([getProfileContext(),getLocalBackups()]);setPreviewError('') }
+    let snapshot
+    try { snapshot=await getProfileContext();setPreviewError('') }
     catch (cause) { setPreviewError(cause.message);throw cause }
-    setProfile(snapshot.profile);setBackups(backupData.backups||[]);setGoals(snapshot.goals)
+    setProfile(snapshot.profile);setGoals(snapshot.goals)
     setCategories(snapshot.categories);setRules(snapshot.rules);setTasks(snapshot.tasks.filter(task=>task.status==='todo'))
     setContexts(snapshot.contexts)
 
@@ -101,7 +112,7 @@ export default function MyProfilePage({ active = true, refreshVersion = 0, auxil
     await runAction(() => saveTaskGrowthContext(task.id, { family, goal_id: goalId ? Number(goalId) : null, deadline_source: current.deadline_source || 'external' }), `${task.title} 的任务类别与目标关联已保存。`)
   }
 
-  function startNewRule() { setEditingRuleId(null); setRuleForm(emptyRule); setShowRuleEditor(true) }
+  function startNewRule() { setEditingRuleId(null); setRuleForm(emptyRule); setShowRuleEditor(true); requestAnimationFrame(()=>{const el=document.getElementById('preference-editor');el?.scrollIntoView({block:'nearest'});el?.querySelector('input')?.focus({preventScroll:true})}) }
   function editRule(rule) {
     const parameters = rule.parameters || {}
     setEditingRuleId(rule.id)
@@ -150,7 +161,7 @@ export default function MyProfilePage({ active = true, refreshVersion = 0, auxil
     const file = event.target.files?.[0]
     if (!file) return
     event.target.value = ''
-    if (!window.confirm('导入会替换当前本地任务、目标、偏好、复盘、记忆及聊天小结。系统会先创建本地安全备份。确定继续吗？')) return
+    if (!await confirmAction('导入会替换当前本地任务、目标、偏好、复盘、记忆及聊天小结。系统会先创建本地安全备份。确定继续吗？')) return
     setBusy(true); setError(''); setNotice('')
     try {
       await importGrowthData(JSON.parse(await file.text()))
@@ -161,76 +172,80 @@ export default function MyProfilePage({ active = true, refreshVersion = 0, auxil
 
   const renderRule = (rule) => <article className={`preference-rule-card ${rule.enabled ? '' : 'rule-disabled'}`} key={rule.id}>
         <div className="preference-rule-copy"><div className="preference-rule-title"><strong>{rule.name}</strong><span className={`badge ${rule.enabled ? 'status-active' : 'status-inactive'}`}>{rule.enabled ? '已启用' : '已停用'}</span>{rule.kind === 'ai_note' && <span className="badge">仅供 AI 参考</span>}{rule.source === 'sample' && <span className="badge">示例</span>}</div><p>{describeRule(rule)}</p><details><summary>详情</summary>{rule.description && <small>{rule.description}</small>}<small>类型：{ruleLabels[rule.kind]} · 来源：{rule.source === 'sample' ? '演示示例' : rule.source === 'ai' ? '你采用的 AI 建议' : '用户确认'} · 更新于 {new Date(rule.updated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</small></details></div>
-        <div className="preference-rule-actions"><button type="button" className="button subtle" disabled={busy} onClick={() => editRule(rule)}>编辑</button><button type="button" className="button subtle" disabled={busy} onClick={() => runAction(() => updatePreferenceRule(rule.id, { enabled: !rule.enabled }), rule.enabled ? '这条偏好已停用，历史记录仍保留。' : '这条偏好已重新启用。')}>{rule.enabled ? '停用' : '启用'}</button></div>
+        <div className="preference-rule-actions"><Button type="button" className="button subtle" disabled={busy} onClick={() => editRule(rule)}>编辑</Button><Button type="button" className="button subtle" disabled={busy} onClick={() => runAction(() => updatePreferenceRule(rule.id, { enabled: !rule.enabled }), rule.enabled ? '这条偏好已停用，历史记录仍保留。' : '这条偏好已重新启用。')}>{rule.enabled ? '停用' : '启用'}</Button></div>
       </article>
   const renderGoal = (goal) => <article className={`goal-card ${goal.status !== 'active' ? 'goal-inactive' : ''}`} key={goal.id}>
         <div className="goal-card-top"><div><span className="goal-priority">{({ 1: '最优先', 2: '重要', 3: '保持推进' })[goal.priority] || '重要'}</span><h4>{goal.title}</h4></div><span className={`badge status-${goal.status === 'active' ? 'active' : 'inactive'}`}>{goal.status === 'active' ? '进行中' : goal.status === 'paused' ? '已暂停' : goal.status === 'completed' ? '已完成' : '已归档'}</span></div>
-        <details><summary>详情</summary>{goal.motivation && <p>{goal.motivation}</p>}<span>版本 v{goal.version}</span></details><div className="goal-metric"><span>{({ time: '投入时间', count: '完成次数', deliverable: '明确交付' })[goal.metric_kind]}：每周 {goal.weekly_target} {goal.unit_label}</span>{goal.due_date && <span>目标日期：{goal.due_date}</span>}</div>
-        <div className="button-row"><button className="button subtle" disabled={busy} onClick={() => { setEditingGoalId(goal.id); setGoalForm({ ...goal, priority: String(goal.priority), weekly_target: String(goal.weekly_target), due_date: goal.due_date || '' }); setShowGoalEditor(true); requestAnimationFrame(()=>{const el=document.getElementById('goal-editor');el?.scrollIntoView({block:'nearest',behavior:'smooth'});el?.querySelector('input')?.focus({preventScroll:true})}) }}>修改目标</button><select aria-label={`${goal.title}状态`} disabled={busy} value={goal.status} onChange={(event) => runAction(() => updateGoal(goal.id, { status: event.target.value }), '目标状态已更新。')}><option value="active">进行中</option><option value="paused">暂停</option><option value="completed">完成</option><option value="archived">归档</option></select></div>
+        {goal.motivation && <details><summary>为什么重要</summary><p>{goal.motivation}</p></details>}<div className="goal-metric"><span>{({ time: '投入时间', count: '完成次数', deliverable: '明确交付' })[goal.metric_kind]}：每周 {goal.weekly_target} {goal.unit_label}</span>{goal.due_date && <span>目标日期：{goal.due_date}</span>}</div>
+        <div className="button-row"><Button className="button subtle" disabled={busy} onClick={() => { setEditingGoalId(goal.id); setGoalForm({ ...goal, priority: String(goal.priority), weekly_target: String(goal.weekly_target), due_date: goal.due_date || '' }); setShowGoalEditor(true); requestAnimationFrame(()=>{const el=document.getElementById('goal-editor');el?.scrollIntoView({block:'nearest',behavior:'smooth'});el?.querySelector('input')?.focus({preventScroll:true})}) }}>修改目标</Button><NativeSelect aria-label={`${goal.title}状态`} disabled={busy} value={goal.status} onChange={(event) => runAction(() => updateGoal(goal.id, { status: event.target.value }), '目标状态已更新。')}><option value="active">进行中</option><option value="paused">暂停</option><option value="completed">完成</option><option value="archived">归档</option></NativeSelect></div>
       </article>
   if (loading) return <><p className="state-box">正在读取档案、目标和已确认偏好…</p>{auxiliaryTarget && createPortal(<p role="status">正在读取档案摘要…</p>,auxiliaryTarget)}</>
 
   const weekdays = ruleForm.weekdays
-  return <><section className="growth-page profile-page" aria-labelledby="profile-heading">
-    {onReturnChat&&<button className="button subtle" onClick={onReturnChat}>返回相关对话</button>}
-    <div className="growth-page-heading"><h2 id="profile-heading" className="visually-hidden">我的档案</h2>{onBusinessChat&&<button className="button subtle" onClick={onBusinessChat}>用 AI 整理目标或偏好</button>}</div>
-    <div className="profile-sections" role="tablist" aria-label="档案分区" onKeyDown={tabKeyboard}>{[['goals','目标'],['time','时间与课程'],['preferences','偏好'],['memories','记忆'],['data','数据管理']].map(([key,label])=><button className="button subtle" key={key} role="tab" id={"profile-tab-"+key} aria-controls={"profile-panel-"+key} tabIndex={section===key?0:-1} aria-selected={section===key} onClick={()=>{setSection(key);if(key==='memories')setMemoryVisited(true)}}>{label}</button>)}</div>
+  return <><Tabs asChild value={section} onValueChange={key=>{setSection(key);setNotice('');setError('');if(key==='memories')setMemoryVisited(true)}}><section className="growth-page profile-page" aria-labelledby="profile-heading">
+    {onReturnChat&&<Button className="button subtle" onClick={onReturnChat}>返回相关对话</Button>}
+    <header className="profile-intro"><div><h2 id="profile-heading">我的档案</h2><p>明确长期方向，让每次安排更贴合自己。</p></div>{onBusinessChat&&<Button className="button secondary" onClick={onBusinessChat}>用 AI 整理档案</Button>}</header>
+    <div className="profile-toolbar"><TabsList className="profile-sections flex-nowrap" aria-label="档案分区">{[['goals','成长目标'],['preferences','安排偏好'],['memories','长期记忆'],['more','更多管理']].map(([key,label])=><TabsTrigger className="whitespace-nowrap px-2 max-sm:text-[13px]" key={key} value={key} id={"profile-tab-"+key} aria-controls={"profile-panel-"+key}>{label}</TabsTrigger>)}</TabsList></div>
     {memoryVisited&&<div role="tabpanel" id="profile-panel-memories" aria-labelledby="profile-tab-memories" hidden={section!=='memories'} inert={section!=='memories'}><MemoryPanel workspace={recoveryWorkspace} active={primaryActive&&section==='memories'} resource={resource} onSource={onOpenConversation} onPreferences={()=>setSection('preferences')}/></div>}
     <EditRecovery recovery={recovery} label="目标与偏好编辑"/><EditRecovery recovery={sectionRecovery} label="档案分区"/>
-    {error && <p className="error-box" role="alert">{error}</p>}{notice && <p className="success-box" role="status">{notice}</p>}
+    {error && <Alert variant="destructive" role="alert">{error}<Button type="button" onClick={()=>load().then(()=>setError('')).catch(e=>setError(e.message))}>重试读取</Button></Alert>}{notice && <Alert role="status">{notice}</Alert>}
 
     <section role="tabpanel" id="profile-panel-preferences" aria-labelledby="profile-tab-preferences" hidden={section!=='preferences'} inert={section!=='preferences'} className="growth-section profile-wide">
-      <div className="growth-section-heading"><div><h3>安排偏好</h3></div><button className="button secondary" type="button" onClick={startNewRule}>新增偏好</button></div>
-      {!rules.length ? <p className="growth-empty">暂无偏好。</p> : <><div className="preference-rule-list">{rules.filter(item=>item.enabled).map(renderRule)}</div><details><summary>已停用</summary><div className="preference-rule-list">{rules.filter(item=>!item.enabled).map(renderRule)}</div></details></>}
+      <div className="growth-section-heading"><div><h3>安排偏好</h3></div><Button className="button secondary" type="button" onClick={startNewRule}>新增偏好</Button></div>
+
       {showRuleEditor && <form id="preference-editor" className="growth-form preference-rule-editor" onSubmit={saveRule}>
         <h4>{editingRuleId ? '编辑偏好规则' : '新增偏好规则'}</h4>
-        <div className="growth-form-row"><label>偏好名称<input required maxLength="120" value={ruleForm.name} onChange={(event) => setRuleForm({ ...ruleForm, name: event.target.value })} placeholder="例如：论文写作尽量上午完成" /></label><label>规则类型<select value={ruleForm.kind} onChange={(event) => setRuleForm({ ...ruleForm, kind: event.target.value })}>{Object.entries(ruleLabels).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label></div>
-        {['prefer_time', 'avoid_time', 'deadline_buffer'].includes(ruleForm.kind) && <label>适用类别<select value={ruleForm.category_key} onChange={(event) => setRuleForm({ ...ruleForm, category_key: event.target.value })}><option value="">全部任务 / 全局</option>{categories.filter((item) => item.active).map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</select></label>}
-        {(ruleForm.kind === 'prefer_time' || ruleForm.kind === 'avoid_time') && <><div className="growth-form-row"><label>开始时间<input type="time" required value={ruleForm.start} onChange={(event) => setRuleForm({ ...ruleForm, start: event.target.value })} /></label><label>结束时间<input type="time" required value={ruleForm.end} onChange={(event) => setRuleForm({ ...ruleForm, end: event.target.value })} /></label></div><fieldset className="weekday-picker"><legend>适用星期（不选表示每天）</legend>{dayNames.map((label, index) => <label key={label}><input type="checkbox" checked={weekdays.includes(index + 1)} onChange={(event) => setRuleForm({ ...ruleForm, weekdays: event.target.checked ? [...weekdays, index + 1].sort() : weekdays.filter((day) => day !== index + 1) })} />{label}</label>)}</fieldset></>}
-        {ruleForm.kind === 'deadline_buffer' && <label>希望至少提前几小时<input type="number" min="0" max="72" value={ruleForm.hours} onChange={(event) => setRuleForm({ ...ruleForm, hours: event.target.value })} /></label>}
-        {ruleForm.kind === 'adjustment_mode' && <label>安排取舍<select value={ruleForm.mode} onChange={(event) => setRuleForm({ ...ruleForm, mode: event.target.value })}><option value="balanced">兼顾习惯、稳定和截止缓冲</option><option value="preference">更符合个人习惯</option><option value="stable">尽量少动已有安排</option></select></label>}
-        {ruleForm.kind === 'ai_note' && <label>给档案助手的参考说明<textarea required maxLength="1200" rows="3" value={ruleForm.text} onChange={(event) => setRuleForm({ ...ruleForm, text: event.target.value })} placeholder="例如：临近考试时，我希望优先复习核心课程。" /></label>}
-        <label>补充说明<textarea rows="2" maxLength="1000" value={ruleForm.description} onChange={(event) => setRuleForm({ ...ruleForm, description: event.target.value })} placeholder="可选，用于解释这条规则的背景" /></label>
-        <div className="button-row"><button className="button primary" disabled={busy}>保存</button><button className="button subtle" type="button" onClick={() => setShowRuleEditor(false)}>取消</button></div>
+        <div className="growth-form-row"><Label>偏好名称<Input required maxLength="120" value={ruleForm.name} onChange={(event) => setRuleForm({ ...ruleForm, name: event.target.value })} placeholder="例如：论文写作尽量上午完成" /></Label><Label>规则类型<NativeSelect value={ruleForm.kind} onChange={(event) => setRuleForm({ ...ruleForm, kind: event.target.value })}>{Object.entries(ruleLabels).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</NativeSelect></Label></div>
+        {['prefer_time', 'avoid_time', 'deadline_buffer'].includes(ruleForm.kind) && <Label>适用类别<NativeSelect value={ruleForm.category_key} onChange={(event) => setRuleForm({ ...ruleForm, category_key: event.target.value })}><option value="">全部任务 / 全局</option>{categories.filter((item) => item.active).map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</NativeSelect></Label>}
+        {(ruleForm.kind === 'prefer_time' || ruleForm.kind === 'avoid_time') && <><div className="growth-form-row"><Label>开始时间<Input type="time" required value={ruleForm.start} onChange={(event) => setRuleForm({ ...ruleForm, start: event.target.value })} /></Label><Label>结束时间<Input type="time" required value={ruleForm.end} onChange={(event) => setRuleForm({ ...ruleForm, end: event.target.value })} /></Label></div><fieldset className="weekday-picker"><legend>适用星期（不选表示每天）</legend>{dayNames.map((label, index) => <Label key={label}><Input type="checkbox" checked={weekdays.includes(index + 1)} onChange={(event) => setRuleForm({ ...ruleForm, weekdays: event.target.checked ? [...weekdays, index + 1].sort() : weekdays.filter((day) => day !== index + 1) })} />{label}</Label>)}</fieldset></>}
+        {ruleForm.kind === 'deadline_buffer' && <Label>希望至少提前几小时<Input type="number" min="0" max="72" value={ruleForm.hours} onChange={(event) => setRuleForm({ ...ruleForm, hours: event.target.value })} /></Label>}
+        {ruleForm.kind === 'adjustment_mode' && <Label>安排取舍<NativeSelect value={ruleForm.mode} onChange={(event) => setRuleForm({ ...ruleForm, mode: event.target.value })}><option value="balanced">兼顾习惯、稳定和截止缓冲</option><option value="preference">更符合个人习惯</option><option value="stable">尽量少动已有安排</option></NativeSelect></Label>}
+        {ruleForm.kind === 'ai_note' && <Label>给档案助手的参考说明<Textarea required maxLength="1200" rows="3" value={ruleForm.text} onChange={(event) => setRuleForm({ ...ruleForm, text: event.target.value })} placeholder="例如：临近考试时，我希望优先复习核心课程。" /></Label>}
+        <Label>补充说明<Textarea rows="2" maxLength="1000" value={ruleForm.description} onChange={(event) => setRuleForm({ ...ruleForm, description: event.target.value })} placeholder="可选，用于解释这条规则的背景" /></Label>
+        <div className="button-row"><Button className="button primary" disabled={busy}>保存</Button><Button className="button subtle" type="button" onClick={() => {setShowRuleEditor(false);setEditingRuleId(null);setRuleForm(emptyRule)}}>取消</Button></div>
       </form>}
+      {!rules.length ? <p className="growth-empty">还没有安排偏好，可以先记录一个适合专注的时段。</p> : <><div className="preference-rule-list">{rules.filter(item=>item.enabled).map(renderRule)}</div><details hidden={!rules.some(item=>!item.enabled)}><summary>已停用（{rules.filter(item=>!item.enabled).length}）</summary><div className="preference-rule-list">{rules.filter(item=>!item.enabled).map(renderRule)}</div></details></>}
     </section>
 
     <section role="tabpanel" id="profile-panel-goals" aria-labelledby="profile-tab-goals" hidden={section!=='goals'} inert={section!=='goals'} className="growth-section profile-wide">
-      <div className="growth-section-heading"><div><h3>长期目标</h3></div><button type="button" className="button secondary" onClick={()=>setShowGoalEditor(v=>!v)}>新增目标</button></div>
+      <div className="growth-section-heading"><div><h3>长期目标</h3></div><Button type="button" className="button secondary" onClick={()=>{setEditingGoalId(null);setGoalForm(emptyGoal);setShowGoalEditor(true);requestAnimationFrame(()=>document.querySelector('#goal-editor input')?.focus())}}>新增目标</Button></div>
       <form hidden={!showGoalEditor} id="goal-editor" onSubmit={saveGoal} className="growth-form">
-        <label>目标名称<input required maxLength="160" value={goalForm.title} onChange={(event) => setGoalForm({ ...goalForm, title: event.target.value })} placeholder="例如：每周阅读三篇论文" /></label>
-        <label>为什么重要<textarea rows="2" maxLength="2000" value={goalForm.motivation} onChange={(event) => setGoalForm({ ...goalForm, motivation: event.target.value })} placeholder="帮助自己和助手理解这个目标的意义" /></label>
-        <div className="growth-form-row"><label>优先顺序<select value={goalForm.priority} onChange={(event) => setGoalForm({ ...goalForm, priority: event.target.value })}><option value="1">最优先</option><option value="2">重要</option><option value="3">保持推进</option></select></label><label>进展方式<select value={goalForm.metric_kind} onChange={(event) => setGoalForm({ ...goalForm, metric_kind: event.target.value, unit_label: event.target.value === 'time' ? '分钟' : event.target.value === 'count' ? '次' : '项' })}><option value="count">完成次数</option><option value="time">投入时间</option><option value="deliverable">明确交付</option></select></label></div>
-        <div className="growth-form-row"><label>每周目标<input type="number" min="1" max="100000" value={goalForm.weekly_target} onChange={(event) => setGoalForm({ ...goalForm, weekly_target: event.target.value })} /></label><label>单位<input maxLength="30" value={goalForm.unit_label} onChange={(event) => setGoalForm({ ...goalForm, unit_label: event.target.value })} /></label></div>
-        <label>目标日期（可选）<input type="date" value={goalForm.due_date || ''} onChange={(event) => setGoalForm({ ...goalForm, due_date: event.target.value })} /></label>
-        <div className="button-row"><button className="button primary" disabled={busy}>{editingGoalId ? '保存目标修改' : '创建目标'}</button>{editingGoalId && <button className="button subtle" type="button" onClick={() => { setEditingGoalId(null); setGoalForm(emptyGoal) }}>取消修改</button>}</div>
+        <Label>目标名称<Input required maxLength="160" value={goalForm.title} onChange={(event) => setGoalForm({ ...goalForm, title: event.target.value })} placeholder="例如：每周阅读三篇论文" /></Label>
+        <Label>进展方式<NativeSelect value={goalForm.metric_kind} onChange={(event) => setGoalForm({ ...goalForm, metric_kind: event.target.value, unit_label: event.target.value === 'time' ? '分钟' : event.target.value === 'count' ? '次' : '项' })}><option value="count">完成次数</option><option value="time">投入时间</option><option value="deliverable">明确交付</option></NativeSelect></Label>
+        <div className="growth-form-row"><Label>每周目标<Input type="number" min="1" max="100000" value={goalForm.weekly_target} onChange={(event) => setGoalForm({ ...goalForm, weekly_target: event.target.value })} /></Label><Label>单位<Input maxLength="30" value={goalForm.unit_label} onChange={(event) => setGoalForm({ ...goalForm, unit_label: event.target.value })} /></Label></div>
+        <details className="profile-extra"><summary>补充设置</summary>        <Label>为什么重要<Textarea rows="2" maxLength="2000" value={goalForm.motivation} onChange={(event) => setGoalForm({ ...goalForm, motivation: event.target.value })} placeholder="帮助自己和助手理解这个目标的意义" /></Label>
+<Label>优先顺序<NativeSelect value={goalForm.priority} onChange={(event) => setGoalForm({ ...goalForm, priority: event.target.value })}><option value="1">最优先</option><option value="2">重要</option><option value="3">保持推进</option></NativeSelect></Label>        <Label>目标日期（可选）<Input type="date" value={goalForm.due_date || ''} onChange={(event) => setGoalForm({ ...goalForm, due_date: event.target.value })} /></Label>
+</details>
+        <div className="button-row"><Button className="button primary" disabled={busy}>{editingGoalId ? '保存目标修改' : '创建目标'}</Button><Button className="button subtle" type="button" onClick={() => { setEditingGoalId(null); setGoalForm(emptyGoal);setShowGoalEditor(false) }}>取消</Button></div>
       </form>
-      {!goals.length ? <p className="growth-empty">暂无目标。</p> : <><div className="goal-list">{goals.filter(item=>item.status==='active').map(renderGoal)}</div><details><summary>其他目标</summary><div className="goal-list">{goals.filter(item=>item.status!=='active').map(renderGoal)}</div></details></>}
+      {!goals.length ? <p className="growth-empty">还没有长期目标，添加一个你想持续推进的方向。</p> : <><div className="goal-list">{!activeGoals(goals).length&&<p className="growth-empty">当前没有进行中的目标，可新增目标或重新启用已有目标。</p>}{activeGoals(goals).map(renderGoal)}</div><details hidden={!goals.some(item=>item.status!=='active')}><summary>其他目标（{goals.filter(item=>item.status!=='active').length}）</summary><div className="goal-list">{goals.filter(item=>item.status!=='active').map(renderGoal)}</div></details></>}
     </section>
 
-    <details hidden={section!=='goals'} inert={section!=='goals'} className="growth-section profile-wide"><summary>类别与关联</summary>
+    <section role="tabpanel" id="profile-panel-more" aria-labelledby="profile-tab-more" hidden={section!=='more'} inert={section!=='more'} className="profile-management">
+    <details open={managementGroup==='categories'} onToggle={e=>{if(e.currentTarget.open)setManagementGroup('categories');else setManagementGroup(v=>v==='categories'?null:v)}} className="growth-section profile-wide"><summary>类别与任务关联</summary>
       <div className="growth-section-heading"><div><h3>任务类别与目标关联</h3></div></div>
-      <form className="category-add-form" onSubmit={saveCategory}><label>{editingCategoryKey ? '修改类别名称' : '新增类别'}<input required maxLength="80" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} placeholder="例如：编程、英语、实验" /></label><button className="button secondary" disabled={busy}>{editingCategoryKey ? '保存名称' : '添加类别'}</button>{editingCategoryKey && <button className="button subtle" type="button" onClick={() => { setEditingCategoryKey(null); setCategoryName('') }}>取消</button>}</form>
-      <div className="category-list">{categories.map((category) => <article className={`category-row ${category.active ? '' : 'rule-disabled'}`} key={category.key}><div><strong>{category.name}</strong><small>{category.is_default ? '默认类别' : '自定义类别'} · {category.active ? '可用于新任务' : '已停用'}</small></div><div className="button-row"><button className="button subtle" disabled={busy} onClick={() => { setEditingCategoryKey(category.key); setCategoryName(category.name) }}>改名</button><button className="button subtle" disabled={busy || (category.key === 'other' && category.active)} onClick={() => runAction(() => updateTaskCategory(category.key, { active: !category.active }), category.active ? '类别已停用；已有任务及历史仍保留。' : '类别已重新启用。')}>{category.active ? '停用' : '启用'}</button></div></article>)}</div>
+      <form className="category-add-form" onSubmit={saveCategory}><Label>{editingCategoryKey ? '修改类别名称' : '新增类别'}<Input required maxLength="80" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} placeholder="例如：编程、英语、实验" /></Label><Button className="button secondary" disabled={busy}>{editingCategoryKey ? '保存名称' : '添加类别'}</Button>{editingCategoryKey && <Button className="button subtle" type="button" onClick={() => { setEditingCategoryKey(null); setCategoryName('') }}>取消</Button>}</form>
+      <div className="category-list">{categories.map((category) => <article className={`category-row ${category.active ? '' : 'rule-disabled'}`} key={category.key}><div><strong>{category.name}</strong><small>{category.is_default ? '默认类别' : '自定义类别'} · {category.active ? '可用于新任务' : '已停用'}</small></div><div className="button-row"><Button className="button subtle" disabled={busy} onClick={() => { setEditingCategoryKey(category.key); setCategoryName(category.name) }}>改名</Button><Button className="button subtle" disabled={busy || (category.key === 'other' && category.active)} onClick={() => runAction(() => updateTaskCategory(category.key, { active: !category.active }), category.active ? '类别已停用；已有任务及历史仍保留。' : '类别已重新启用。')}>{category.active ? '停用' : '启用'}</Button></div></article>)}</div>
       {!tasks.length ? <p className="growth-empty">目前没有待关联的未完成任务。</p> : <div className="task-goal-list">{tasks.map((task) => {
         const context = contexts[task.id] || {}
-        return <div className="task-goal-row" key={task.id}><strong>{task.title}</strong><label>任务类别<select value={context.family || 'other'} disabled={busy} onChange={(event) => linkTask(task, context.goal_id || '', event.target.value)}>{categories.filter((item) => item.active || item.key === context.family).map((item) => <option key={item.key} value={item.key}>{item.name}{item.active ? '' : '（已停用）'}</option>)}</select></label><label>关联目标<select value={context.goal_id || ''} disabled={busy} onChange={(event) => linkTask(task, event.target.value, context.family || 'other')}><option value="">暂不关联</option>{goals.filter((goal) => goal.status === 'active').map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label></div>
+        return <div className="task-goal-row" key={task.id}><strong>{task.title}</strong><Label>任务类别<NativeSelect value={context.family || 'other'} disabled={busy} onChange={(event) => linkTask(task, context.goal_id || '', event.target.value)}>{categories.filter((item) => item.active || item.key === context.family).map((item) => <option key={item.key} value={item.key}>{item.name}{item.active ? '' : '（已停用）'}</option>)}</NativeSelect></Label><Label>关联目标<NativeSelect value={context.goal_id || ''} disabled={busy} onChange={(event) => linkTask(task, event.target.value, context.family || 'other')}><option value="">暂不关联</option>{goals.filter((goal) => goal.status === 'active').map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</NativeSelect></Label></div>
       })}</div>}
     </details>
 
-    <details role="tabpanel" id="profile-panel-time" aria-labelledby="profile-tab-time" hidden={section!=='time'} inert={section!=='time'} className="growth-section course-settings profile-wide" onToggle={event=>{if(event.currentTarget.open)setCourseVisited(true)}}><summary><strong>课程与保护时间</strong></summary>{courseVisited&&<TimeRulesPage onDataChanged={onDataChanged} />}</details>
-    <details role="tabpanel" id="profile-panel-data" aria-labelledby="profile-tab-data" hidden={section!=='data'} inert={section!=='data'} className="growth-section profile-wide"><summary>历史与备份</summary>
+    <details open={managementGroup==='time'} className="growth-section course-settings profile-wide" onToggle={e=>{if(e.currentTarget.open){setCourseVisited(true);setManagementGroup('time')}else setManagementGroup(v=>v==='time'?null:v)}}><summary><strong>课程与保护时间</strong></summary>{courseVisited&&<TimeRulesPage onDataChanged={onDataChanged} />}</details>
+    <details open={managementGroup==='data'} onToggle={e=>{if(e.currentTarget.open)setManagementGroup('data');else setManagementGroup(v=>v==='data'?null:v)}} className="growth-section profile-wide"><summary>数据与备份</summary>
       <div className="growth-section-heading"><div><h3>档案历史与数据管理</h3></div></div>
       {!profile?.history?.length ? <p className="growth-empty">尚无资料历史版本。</p> : <details className="insight-history"><summary>查看资料修改版本（{profile.history.length}）</summary><ol className="revision-list">{[...profile.history].reverse().map((revision) => <li key={revision.version}><strong>版本 v{revision.version}</strong><time>{new Date(revision.changed_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</time><p>{revision.direction || '长期方向通过目标管理'}</p></li>)}</ol></details>}
-      <div className="button-row"><button className="button secondary" disabled={busy} onClick={exportData}>下载数据备份</button><label className="button subtle file-button">从 JSON 备份恢复<input type="file" accept="application/json,.json" disabled={busy} onChange={importDataFile} /></label></div>
+      <div className="button-row"><Button className="button secondary" disabled={busy} onClick={exportData}>下载数据备份</Button><Label className="button subtle file-button">从 JSON 备份恢复<Input type="file" accept="application/json,.json" disabled={busy} onChange={importDataFile} /></Label></div>
       <p className="helper">应用启动时每天最多自动保存一次 SQLite 安全副本，最多保留 5 份。导入前还会额外保存当前数据库。</p>
-      {backups.length ? <ul className="backup-list">{backups.map((backup) => <li key={backup.name}><strong>{backup.name}</strong><span>{Math.ceil(backup.size_bytes / 1024)} KB</span></li>)}</ul> : <p className="growth-empty">尚未生成自动备份；应用下次启动时会检查并创建。</p>}
+      {backupLoading&&<p role="status">正在读取备份…</p>}{backupError&&<Alert variant="destructive">{backupError}<Button onClick={loadBackups}>重试读取备份</Button></Alert>}{!backupLoading&&!backupError&&(backups.length ? <ul className="backup-list">{backups.map((backup) => <li key={backup.name}><strong>{backup.name}</strong><span>{Math.ceil(backup.size_bytes / 1024)} KB</span></li>)}</ul> : <p className="growth-empty">尚未生成自动备份；应用下次启动时会检查并创建。</p>)}
     </details>
-  </section>
+    </section>
+  </section></Tabs>
     {auxiliaryTarget && createPortal(<section className="v2-readonly-summary" aria-label="档案辅助视图">
       {previewError && <p role="status">档案摘要暂时无法更新。</p>}
       <h3>长期目标</h3>
-      {goals.filter(goal => goal.status === 'active').slice(0,3).map(goal => <article key={goal.id}><strong>{goal.title}</strong><p>每周 {goal.weekly_target} {goal.unit_label}</p></article>)}
+      {activeGoals(goals).slice(0,3).map(goal => <article key={goal.id}><strong>{goal.title}</strong><p>每周 {goal.weekly_target} {goal.unit_label}</p></article>)}
       {goals.filter(goal => goal.status === 'active').length > 3 && <p className="helper">另有 {goals.filter(goal => goal.status === 'active').length-3} 项进行中的目标。</p>}
       {!goals.some(goal => goal.status === 'active') && <p>暂无进行中的目标。</p>}
       <h3>安排偏好</h3>

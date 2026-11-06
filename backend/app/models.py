@@ -168,6 +168,30 @@ class PlanningState(Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class CalendarEntry(Base):
+    __tablename__ = 'calendar_entries'
+    __table_args__ = (CheckConstraint('end_at > start_at', name='calendar_positive_interval'),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_key: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
+    source_rule_id: Mapped[int | None] = mapped_column(ForeignKey('time_rules.id'), nullable=True)
+    source_date: Mapped[DateValue | None] = mapped_column(Date, nullable=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default='', nullable=False)
+    start_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
+    end_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    blocks_time: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class CalendarMutation(Base):
+    __tablename__ = 'calendar_mutations'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class CourseImport(Base):
     __tablename__ = 'course_imports'
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

@@ -3,6 +3,25 @@ import asyncio
 import pytest
 
 
+def test_decomposition_uses_structured_output_and_preserves_user_deadline(monkeypatch):
+    from datetime import datetime
+    from app.services import assistant_ai
+    from app.services.claude_client import ClaudeConfig
+    monkeypatch.setattr(assistant_ai, 'get_claude_config', lambda: ClaudeConfig('test', 'test'))
+    deadline = '2026-10-28T22:00:00+08:00'
+    async def response(text, system, config, max_tokens, **options):
+        assert options.get('json_mode') is True
+        request = json.loads(text)['request']
+        assert request['deadline'] == deadline
+        return json.dumps({'parent': {'title': '展示报告', 'deadline': deadline}, 'children': [
+            {'title': title, 'deadline': deadline, 'duration_minutes': 30, 'sort_order': i}
+            for i, title in enumerate(['提纲', '制作', '检查'])]})
+    monkeypatch.setattr(assistant_ai, 'request_claude', response)
+    result = asyncio.run(assistant_ai.decompose_task({'title': '展示报告', 'deadline': deadline, 'expected_duration_minutes': 90}, datetime.fromisoformat('2026-10-27T22:00:00+08:00')))
+    assert len(result.children) == 3 and sum(c.duration_minutes for c in result.children) == 90
+    assert result.parent.deadline.isoformat() == deadline
+
+
 @pytest.mark.parametrize('priority,accepted', [(2, True), ('normal', False)])
 def test_profile_goal_priority_contract_is_numeric_and_strict(monkeypatch, priority, accepted):
     from app.services import assistant_ai

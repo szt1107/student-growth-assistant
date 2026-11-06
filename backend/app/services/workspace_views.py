@@ -34,22 +34,27 @@ def calendar_events(db, start, end):
     read_snapshot(db)
     a, b = bounds(start, end)
     events, busy = [], []
-    rows = db.execute(select(PlanItem, Plan.week_start).join(Plan).where(Plan.status == 'confirmed',
+    rows = db.execute(select(PlanItem, Plan.week_start,Task.description).join(Plan,Plan.id==PlanItem.plan_id).outerjoin(Task,Task.id==PlanItem.task_id).where(Plan.status == 'confirmed',
         PlanItem.start_at < b, PlanItem.end_at > a).order_by(PlanItem.id).limit(6001)).all()
     if len(rows) > 6000:
         error('RANGE_TOO_LARGE', '此范围事项过多，请缩小日历范围。', 413)
     current = assistant_now().date(); current_week = current-timedelta(days=current.weekday())
+    from ..models import CalendarEntry
+    calendar_entries=list(db.scalars(select(CalendarEntry)).all())
+    exceptions={(e.source_rule_id,e.source_date) for e in calendar_entries if e.source_rule_id}
     seen = set()
-    for item, week in rows:
+    for item, week, description in rows:
+        if item.kind=='course' and (item.time_rule_id,item.start_at.astimezone(SHANGHAI).date()) in exceptions:
+            continue
         if item.kind == 'course' and week >= current_week:
             continue  # Current courses come from the current rule, never twice.
         kind = 'formal_task' if item.kind == 'task' else 'course_snapshot'
-        events.append(dict(id=f'plan:{item.id}', title=item.title_snapshot, start=item.start_at.isoformat(),
+        events.append(dict(id=f'plan:{item.id}', title=item.title_snapshot, description=description or '',start=item.start_at.isoformat(),
             end=item.end_at.isoformat(), allDay=False, kind=kind, task_id=item.task_id, plan_item_id=item.id,
             rule_id=item.time_rule_id, source='正式已保存快照'))
         busy.append((item.start_at.astimezone(SHANGHAI), item.end_at.astimezone(SHANGHAI)))
         seen.add((item.time_rule_id, item.start_at.astimezone(SHANGHAI).date()))
-    rules = time_rules(db); names = {r.id: r.title for r in rules}
+    rules = time_rules(db, include_calendar=False,calendar_entries=calendar_entries); names = {r.id: r.title for r in rules}
     week = start-timedelta(days=start.weekday())
     while week < end:
         for item in expand_time_rules(week, rules):
@@ -75,6 +80,14 @@ def calendar_events(db, start, end):
     if len(events) > 6000:
         error('RANGE_TOO_LARGE', '此范围事项过多，请缩小日历范围。', 413)
     # Free windows only describe 08:00–22:00 after real occupied/protected blocks.
+    from ..codex.calendar_api import projected_entries
+    for entry in projected_entries(db,a,b,calendar_entries):
+        if entry['source_rule_id']:
+            kind=next((r.kind for r in rules if r.id==entry['source_rule_id']),None)
+            entry['calendar_group']='courses' if kind=='course' else 'protected'
+        events.append(entry)
+        if entry['blocks_time']:
+            busy.append((datetime.fromisoformat(entry['busy_start']),datetime.fromisoformat(entry['busy_end'])))
     free = []
     for n in range((end-start).days):
         day=start+timedelta(days=n); left=datetime.combine(day,time(8),SHANGHAI); right=datetime.combine(day,time(22),SHANGHAI)
@@ -85,9 +98,9 @@ def calendar_events(db, start, end):
         if cursor<right:free.append(dict(start=cursor.isoformat(),end=right.isoformat()))
     overlaps = []
     active=[]
-    for event in sorted((e for e in events if not e['allDay']),key=lambda e:datetime.fromisoformat(e['start'])):
-        begin=datetime.fromisoformat(event['start']); finish=datetime.fromisoformat(event['end'])
-        active=[e for e in active if datetime.fromisoformat(e['end'])>begin]
+    for event in sorted((e for e in events if e.get('blocks_time') is not False and (not e['allDay'] or e['kind']=='calendar')),key=lambda e:datetime.fromisoformat(e.get('busy_start') or e['start'])):
+        begin=datetime.fromisoformat(event.get('busy_start') or event['start']); finish=datetime.fromisoformat(event.get('busy_end') or event['end'])
+        active=[e for e in active if datetime.fromisoformat(e.get('busy_end') or e['end'])>begin]
         if len(overlaps)<1000:overlaps.extend([e['id'],event['id']] for e in active[:1000-len(overlaps)])
         active.append(event)
     scheduled=exists(select(PlanItem.id).join(Plan).where(Plan.status=='confirmed',PlanItem.task_id==Task.id,PlanItem.end_at>assistant_now()))
