@@ -4,8 +4,8 @@
 
 前端仅发送 `mode: plan | review | profile | null`，不拼接提示词，也不改变可见消息正文。首页第一条消息与已有会话都支持。
 
-后端标准提示词集中在 `backend/app/codex/composer_modes.py`，在工具决策和最终回复两个模型调用处追加。模式参与相关资料筛选，但不扩大工具权限，也不会自动保存正式资料。实际修改仍走原有草案确认流程。
+后端标准提示词集中在 `backend/app/codex/composer_modes.py`，在工具决策和最终回复阶段追加。模式参与资料筛选和工具选择，明确的生成请求会按所选场景生成对应草案，正式修改须经用户确认。普通聊天由助手根据本轮需求判断工具和草案类型。
 
 请求模式存入原有 run payload，无需数据库迁移；同一发送标识不得用于不同模式。重试读取原 run 的模式。取消只影响之后发送的消息。
 
-测试：`backend/tests/codex/test_composer_modes.py`（HTTP、提示词注入、非法模式、幂等冲突、重试、可见消息正文、工具权限），`codex/composer-mode-delivery-browser.cjs`（浏览器发送及取消），`codex/composer-equal-height-browser.cjs`（桌面与小屏稳定布局）。
+相关回归位于 `backend/tests/codex/test_composer_modes.py` 和 `frontend/tests/conversations.test.js`，覆盖模式校验、幂等、重试、工具权限和会话行为。

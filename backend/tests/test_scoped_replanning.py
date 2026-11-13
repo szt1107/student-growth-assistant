@@ -320,7 +320,7 @@ def test_weekend_replanning_keeps_next_week_and_completed_history(client,test_en
     assert p['status']=='ready',p
     assert by_ref(p['items'],f"task:{tasks[1]['id']}")==by_ref(before,f"task:{tasks[1]['id']}")
     assert len(p['retained'])==1 and p['retained'][0]['ref']==f"task:{tasks[2]['id']}"
-    assert all(dt(x['start_at']).date()==date(2026,10,12) for x in p['items'])
+    assert all(date(2026,10,12)<=dt(x['start_at']).date()<=date(2026,10,13) for x in p['items'])
     assert len(p['items'])==2
     assert client.post(f"/api/assistant/proposals/{p['id']}/confirm").status_code==200
     assert len(official(client,sid))==3

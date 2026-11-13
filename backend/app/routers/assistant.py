@@ -679,11 +679,16 @@ def confirm(id:int,db:Session=Depends(get_db),expected_version:str|None=None):
         if p.status=='applied': return response(p)
         from ..services.workspace_drafts import check
         check(db,p,expected_version)
+        if p.payload.get('preview_input'):
+            from ..services.schedule_preview import editable_schedule
+            if editable_schedule(db,p)!=p.payload['preview_input']:
+                fail('DRAFT_RECALCULATION_REQUIRED','请先保存草案编辑，核对按原时间要求重新计算的安排，再确认采用。')
         if p.status!='ready': fail('PROPOSAL_NOT_READY','当前方案不可采用。')
         s=require(db,AssistantSession,p.session_id); require_current(s)
         if s.latest_proposal_id!=p.id or p.source_revision!=get_or_create_planning_state(db).revision:
             fail('STALE_CANDIDATE','候选依据的资料已变化，请重新生成。')
-        world=proposed_world(db,s.week_start,p.payload['actions'],_previous_candidate(db,s))
+        world=proposed_world(db,s.week_start,p.payload['actions'],_previous_candidate(db,s),
+            include_unplanned=p.payload.get('include_unplanned',True))
         _verified_scope(db,p)
         try:
             validate_scope(p.payload,world,world_rules(db,world,(p.payload.get('temporary_preferences') or {}).get('blocked_windows',[])))

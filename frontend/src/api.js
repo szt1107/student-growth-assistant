@@ -169,6 +169,7 @@ export const saveReviewRecord = (data,id) => request(`/api/reviews/records${id?'
 export const getWorkspaceDraft = (kind,id) => request(`/api/workspace/drafts/${kind}/${id}`)
 export const saveCalendarChange = payload => request('/api/calendar/changes',{method:'POST',body:JSON.stringify(payload)})
 export const editWorkspaceDraft = (kind,id,version,content) => request(`/api/workspace/drafts/${kind}/${id}`,{method:'PATCH',body:JSON.stringify({expected_version:version,content})})
+export const splitWorkspaceDraft = (id,version,content,target) => request(`/api/workspace/drafts/planning/${id}/split`,{method:'POST',body:JSON.stringify({expected_version:version,content,target})},125000)
 export const actWorkspaceDraft = (kind,id,version,action) => request(`/api/workspace/drafts/${kind}/${id}/${action}`,{method:'POST',body:JSON.stringify({expected_version:version})})
 export const createReviewDraft = (id,data) => request(`/api/conversations/${id}/review-drafts`,{method:'POST',body:JSON.stringify(data)},125000)
 

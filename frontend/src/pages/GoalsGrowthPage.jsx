@@ -13,7 +13,7 @@ import SafeMessage from '../components/SafeMessage.jsx'
 import { reviewRange } from '../calendar.js'
 
 
-export default function ReviewPage({ onAdjustTask, active = true, refreshVersion = 0, auxiliaryTarget = null, onDataChanged, onBusinessChat, onReturnChat, workspace, today, onDiscuss, resource, onOpenTask, primaryActive=active }) {
+export default function ReviewPage({ onAdjustTask, active = true, refreshVersion = 0, auxiliaryTarget = null, onDataChanged, onBusinessChat, onReturnChat, workspace, today, onDiscuss, resource, onOpenTask, primaryActive=active, clockMode='realtime' }) {
   const [statisticsMounted,setStatisticsMounted]=useState(false)
   const [parentTasks, setParentTasks] = useState([])
   const [analyticsVersion, setAnalyticsVersion] = useState(0)
@@ -80,7 +80,7 @@ export default function ReviewPage({ onAdjustTask, active = true, refreshVersion
 
   return <><section className="growth-page" aria-label="回顾与成长">
     {onReturnChat&&<Button className="button subtle" onClick={onReturnChat}>返回相关对话</Button>}
-    {today&&<ReviewWorkspace workspace={workspace} today={today} active={primaryActive} refreshVersion={refreshVersion} onDiscuss={onDiscuss} onSaved={onDataChanged} resource={resource} onOpenTask={onOpenTask} onAnalyticsOpen={()=>setStatisticsMounted(true)} analyticsContent={<GrowthAnalytics active={primaryActive} refreshVersion={analyticsVersion} parentTasks={parentTasks} onOverview={setOverview} onOverviewError={setOverviewError} onRefresh={()=>refresh().catch(cause=>setError(cause.message))} />}/>}
+    {today&&<ReviewWorkspace workspace={workspace} today={today} clockMode={clockMode} active={primaryActive} refreshVersion={refreshVersion} onDiscuss={onDiscuss} onSaved={onDataChanged} resource={resource} onOpenTask={onOpenTask} onAnalyticsOpen={()=>setStatisticsMounted(true)} analyticsContent={<GrowthAnalytics active={primaryActive} refreshVersion={analyticsVersion} parentTasks={parentTasks} onOverview={setOverview} onOverviewError={setOverviewError} onRefresh={()=>refresh().catch(cause=>setError(cause.message))} />}/>}
     <details className="review-statistics" onToggle={e=>{if(e.currentTarget.open)setStatisticsMounted(true)}}><summary>AI 周复盘与习惯建议</summary>{statisticsMounted&&<>
     <div className="growth-page-heading">
       <div><h3 id="growth-heading">AI 周复盘</h3></div><span className="review-week muted">{weekStart} 周</span>

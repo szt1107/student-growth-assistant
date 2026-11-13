@@ -2,7 +2,7 @@
 from datetime import date
 from typing import Annotated, Literal
 from pydantic import AwareDatetime, Field, model_validator
-from .assistant_schemas import StrictModel, Action, ConversationMessageCreate
+from .assistant_schemas import StrictModel, Action, ConversationMessageCreate, Window
 from .task_breakdown_schemas import BreakdownCreate, BreakdownContent, DEFAULT_WORK_MINUTES
 
 DRAFT_DEFAULTS = {'duration_minutes':DEFAULT_WORK_MINUTES,'start_time':'09:00','title':'待命名任务',
@@ -39,6 +39,10 @@ class DraftEdit(StrictModel):
     content: dict
 
 
+class DraftSplit(DraftEdit):
+    target: str = Field(pattern=r'^(task:\d+|draft:[a-zA-Z0-9-]+)$')
+
+
 class DraftAction(StrictModel):
     expected_version: str = Field(min_length=1,max_length=80)
 
@@ -50,7 +54,7 @@ class DraftRef(StrictModel):
 
 
 class ToolCall(StrictModel):
-    name: Literal['tasks','goals','preferences','calendar','review','memories','attention','time_rules','task_execution','planning_draft','breakdown_draft','profile_draft','feedback_draft','edit_draft','memory_suggestion','review_draft']
+    name: Literal['tasks','goals','preferences','calendar','review','memories','attention','time_rules','task_execution','planning_draft','breakdown_draft','profile_draft','feedback_draft','edit_draft','split_draft','memory_suggestion','review_draft']
     arguments: dict = Field(default_factory=dict)
 
 
@@ -90,17 +94,29 @@ class SchedulePreview(StrictModel):
     day: date
     start_time: str = Field(default=DRAFT_DEFAULTS['start_time'], pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
     start_exact: bool = False
+    time_period: Literal['morning', 'noon', 'afternoon', 'evening'] | None = None
     deadline: AwareDatetime | None = None
     priority: Literal['high', 'normal', 'low'] = 'normal'
     segments: int = Field(default=1, strict=True, ge=1, le=8)
+    min_block_minutes: int = Field(default=5, strict=True, ge=5, le=840, multiple_of=5)
     break_minutes: int = Field(default=0, strict=True, ge=0, le=120, multiple_of=5)
     task_id: int | None = Field(default=None, strict=True, ge=1)
+    work_segments: list[Window] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode='after')
     def valid_segments(self):
         if not self.title.strip():raise ValueError('请填写任务名称')
-        if self.duration_minutes % self.segments or (self.duration_minutes // self.segments) % 5:
-            raise ValueError('每段工作时长须为5分钟整数倍')
+        if self.duration_minutes < self.segments*self.min_block_minutes:
+            raise ValueError('工作时长不足以分成指定段数，请核对每段时长')
+        if self.work_segments:
+            if len(self.work_segments)!=self.segments:
+                raise ValueError('安排时段数量须与分段数一致')
+            minutes=[(window.end_at-window.start_at).total_seconds()/60 for window in self.work_segments]
+            if any(value<5 or value%5 for value in minutes) or sum(minutes)!=self.duration_minutes:
+                raise ValueError('各段须为5分钟整数倍，总时长须等于预计分钟')
+            for previous,current in zip(self.work_segments,self.work_segments[1:]):
+                if current.start_at<previous.end_at:
+                    raise ValueError('分段时间须按先后顺序填写，不能重叠')
         return self
 
 
@@ -113,6 +129,11 @@ class EditToolArgs(StrictModel):
     id: int = Field(strict=True,ge=1)
     version: str
     content: dict
+
+
+class SplitToolArgs(EditToolArgs):
+    kind: Literal['planning'] = 'planning'
+    target: str = Field(pattern=r'^(task:\d+|draft:[a-zA-Z0-9-]+)$')
 
 
 class ReviewDraftCreate(StrictModel):

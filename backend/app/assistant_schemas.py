@@ -25,6 +25,8 @@ class Profile(StrictModel):
     splittable: bool = False
     min_block_minutes: int = Field(default=30, strict=True, ge=5, le=840, multiple_of=5)
     max_segments: int = Field(default=4, strict=True, ge=1, le=8)
+    segment_count: int | None = Field(default=None, strict=True, ge=1, le=8)
+    min_break_minutes: int = Field(default=0, strict=True, ge=0, le=120, multiple_of=5)
 
     @model_validator(mode='before')
     @classmethod

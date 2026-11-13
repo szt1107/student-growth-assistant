@@ -39,7 +39,7 @@ export default function CalendarEditor({initial,revision,source,anchor,onClose,o
    </fieldset>
    {deleting&&<p className="recovery-note">确认移除这一次安排？关联任务、执行记录和历史复盘会保留。</p>}
    <footer className="dayflow-inline-footer">{!readOnly&&value.event_id&&<Button type="button" className="button subtle dayflow-delete" disabled={busy} onClick={()=>{if(deleting){request.current=null;submit('delete')}else setDeleting(true)}}>{deleting?'确认移除':'移除安排'}</Button>}
-    {source?.task_id&&<Button type="button" className="button secondary" disabled={busy} onClick={()=>{onClose();onOpenTask?.(source.task_id)}}>查看关联任务</Button>}
+    {source?.task_id&&onOpenTask&&<Button type="button" aria-haspopup="dialog" className="button secondary" disabled={busy} onClick={()=>{onClose();onOpenTask(source.task_id)}}>查看关联任务</Button>}
     <Button type="button" className="button secondary" disabled={busy} onClick={onClose}>取消</Button>
     {!readOnly&&<Button type="submit" className="button primary" disabled={busy||!value.start||!value.end||!value.title.trim()}>{busy?'保存中…':value.event_id?'确认保存修改':'保存日程'}</Button>}
    </footer>

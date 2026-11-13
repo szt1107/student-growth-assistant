@@ -64,7 +64,7 @@ def projected_entries(db,a,b,entries=None):
         source_rule_id=e.source_rule_id) for e in rows]
 
 
-def calendar_rules(entries):
+def calendar_rules(entries, course_rule_ids=()):
     """Expose local busy events to all consumers of the shared rule expander."""
     rules=[]
     for entry in entries:
@@ -75,7 +75,7 @@ def calendar_rules(entries):
             left=max(start,datetime.combine(day,time.min,SHANGHAI))
             right=min(end,datetime.combine(day,time.max,SHANGHAI))
             if right>left:
-                rules.append(TimeRuleInput(id=1_000_000_000+entry.id*400+index,kind='protected',title=entry.title,
+                rules.append(TimeRuleInput(id=1_000_000_000+entry.id*400+index,kind='course' if entry.source_rule_id in course_rule_ids else 'protected',title=entry.title,
                     recurrence='once',date=day,start_time=left.time(),end_time=right.time()))
             day+=timedelta(days=1);index+=1
     return rules

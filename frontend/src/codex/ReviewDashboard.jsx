@@ -28,16 +28,16 @@ export default function ReviewDashboard({ facts, onOpenTask, active = true }) {
     if (key === 'effort') setSelection({ key: 'effort', label: '有投入反馈的任务', taskIds: facts.task_ids })
   }
   const metrics = [
-    { key: 'completed', title: '已确认完成', value: facts.completed_count, unit: '项', note: '以有效完成记录为准', Icon: CheckCheck },
-    { key: 'effort', title: '已记录投入', value: !facts.feedback_ids.length ? '—' : facts.unknown_count && !facts.known_minutes ? '未知' : facts.known_minutes, unit: facts.feedback_ids.length && !(facts.unknown_count && !facts.known_minutes) ? '分钟' : '', note: facts.unknown_count ? `另有 ${facts.unknown_count} 条反馈耗时未知` : facts.feedback_ids.length ? '仅汇总已知实际耗时' : '当前范围暂无投入反馈', Icon: Clock3 },
-    { key: 'pending', title: '待反馈安排', value: facts.pending_count, unit: '项', note: '已结束安排，等待补充反馈', Icon: CircleHelp },
-    { key: 'feedback', title: '有效反馈', value: facts.feedback_ids.length, unit: '条', note: '点击查看全部回顾事项', Icon: MessageSquareText },
+    { key: 'completed', title: '已确认完成', value: facts.completed_count, unit: '项', Icon: CheckCheck },
+    { key: 'effort', title: '已记录投入', value: !facts.feedback_ids.length ? '—' : facts.unknown_count && !facts.known_minutes ? '未知' : facts.known_minutes, unit: facts.feedback_ids.length && !(facts.unknown_count && !facts.known_minutes) ? '分钟' : '', Icon: Clock3 },
+    { key: 'pending', title: '待反馈安排', value: facts.pending_count, unit: '项', Icon: CircleHelp },
+    { key: 'feedback', title: '有效反馈', value: facts.feedback_ids.length, unit: '条', Icon: MessageSquareText },
   ]
   return <div className="review-dashboard">
-    <div className="review-metrics" aria-label="回顾概览">{metrics.map(({ key, title, value, unit, note, Icon }) =>
+    <div className="review-metrics" aria-label="回顾概览">{metrics.map(({ key, title, value, unit, Icon }) =>
       <Button className="metric-card review-kpi" key={key} aria-pressed={key === 'completed' || key === 'pending' ? status === key : key === 'effort' ? selection?.key === key : status === 'all' && !selection} onClick={() => selectMetric(key)}>
         <span className="review-kpi-label"><span>{title}</span><Icon size={17} aria-hidden="true" /></span>
-        <strong>{value}<small>{unit}</small></strong><span className="review-kpi-note">{note}</span>
+        <strong>{value}<small>{unit}</small></strong>
       </Button>)}</div>
 
     <div className="review-viz-grid">
@@ -62,7 +62,6 @@ export default function ReviewDashboard({ facts, onOpenTask, active = true }) {
               <span>{row.label}</span><strong>{!row.feedbackCount || row.unknown && !row.minutes ? '—' : `${row.unknown ? '≥' : ''}${row.minutes}`}</strong>
             </Button>)}</div>
         </> : <div className="review-empty-chart"><Clock3 size={28} aria-hidden="true" /><strong>还没有投入记录</strong><p>补充任务的执行反馈后，就能看到时间分布。</p></div>}
-        <p className="review-footnote">柱高仅表示已知分钟；“—”表示无记录或耗时未知，具体情况见日期提示。点击日期或柱形筛选明细。</p>
       </section>
 
       <section className="review-data-card review-categories" aria-labelledby="review-category-title">
@@ -73,12 +72,11 @@ export default function ReviewDashboard({ facts, onOpenTask, active = true }) {
             <span className="review-category-info"><strong>{row.name}</strong><span>{effortLabel(row)}<small>{row.share === null ? '占比未知' : `${(row.share * 100).toFixed(1)}%`}</small></span></span>
             <span className="review-category-track" aria-hidden="true"><span style={{ width: `${(row.share || 0) * 100}%` }} /></span>
           </Button>)}</div>}
-        {facts.unknown_count > 0 && <p className="review-footnote">另有 {facts.unknown_count} 条耗时未知的反馈，未纳入比例计算。</p>}
       </section>
     </div>
 
     <section className="review-data-card review-details" aria-labelledby="review-details-title">
-      <div className="review-card-heading"><div><h3 id="review-details-title">执行明细 <span className="review-count">{rows.length}</span></h3><p>从趋势和类别中定位记录，也可以直接搜索。</p></div>
+      <div className="review-card-heading"><div><h3 id="review-details-title">执行明细 <span className="review-count">{rows.length}</span></h3></div>
         <Label className="review-search"><Search size={16} aria-hidden="true" /><span className="visually-hidden">搜索回顾任务</span><Input type="search" placeholder="搜索任务…" value={query} onChange={e => setQuery(e.target.value)} /></Label>
       </div>
       <div className="review-filterbar"><div className="review-status-filter" role="group" aria-label="回顾事项筛选">{[['all', '全部'], ['completed', '已完成'], ['partial', '部分完成'], ['pending', '待反馈']].map(([key, label]) =>
@@ -91,16 +89,14 @@ export default function ReviewDashboard({ facts, onOpenTask, active = true }) {
         <div className="review-source-table"><table><caption className="visually-hidden">所选范围的任务执行记录</caption><thead><tr><th>任务</th><th>记录状态</th><th>实际投入</th><th>反馈</th><th><span className="visually-hidden">操作</span></th></tr></thead><tbody>{rows.map(row => <tr key={row.task_id}>
           <th scope="row"><span className="review-task-title">{row.title}</span></th>
           <td><div className="review-state-badges">{row.states.map(state => <span className="review-state" data-state={state} key={state}>{stateNames[state] || state}</span>)}</div></td>
-          <td className="review-time-cell">{effortLabel(row)}</td><td><details><summary>{row.feedback_ids.length} 条</summary><p>{row.completion_feedback_ids.length} 条完成记录。待反馈不等于未完成。</p></details></td>
+          <td className="review-time-cell">{effortLabel(row)}</td><td><details><summary>{row.feedback_ids.length} 条</summary><p>{row.completion_feedback_ids.length} 条完成记录</p></details></td>
           <td><Button className="button subtle review-open-task" aria-label={`查看任务与反馈：${row.title}`} onClick={() => setOpenedSource(row)}>查看<ArrowUpRight size={14} aria-hidden="true" /></Button></td>
         </tr>)}</tbody></table></div>}
-      <p className="review-footnote">待反馈表示已结束的安排尚未补充反馈，不代表任务未完成。状态可能同时包含完成与部分投入记录。</p>
     </section>
 
-    {facts.goals.length > 0 && <section className="review-data-card" aria-labelledby="review-goals-title"><div className="review-card-heading"><div><h3 id="review-goals-title">目标投入与进展</h3><p>仅展示所选时段内有关联执行记录的目标。</p></div></div>
-      <div className="review-goal-grid">{facts.goals.map(goal => <article className="review-goal" key={goal.id}><h4>{goal.title}</h4><strong>{goal.metric_kind === 'time' ? recordedTime(goal.value, goal.unknown_count) : `${goal.value} ${goal.unit}`}</strong><p>{goal.note}</p></article>)}</div>
+    {facts.goals.length > 0 && <section className="review-data-card" aria-labelledby="review-goals-title"><div className="review-card-heading"><div><h3 id="review-goals-title">目标投入与进展</h3></div></div>
+      <div className="review-goal-grid">{facts.goals.map(goal => <article className="review-goal" key={goal.id}><h4>{goal.title}</h4><strong>{goal.metric_kind === 'time' ? recordedTime(goal.value, goal.unknown_count) : `${goal.value} ${goal.unit}`}</strong></article>)}</div>
     </section>}
-    <details className="review-definitions"><summary>统计口径与记录完整性{facts.unknown_count ? ` · ${facts.unknown_count} 条耗时未知` : ''}</summary><p>{facts.note}</p><p>数据截至 {facts.as_of?.replace('T', ' ').slice(0, 16)}（北京时间）。完成、投入和待反馈采用不同口径，不能相加计算完成率。</p></details>
     {openedSource && active && <ReviewFeedbackDialog source={openedSource} onClose={() => setOpenedSource(null)} onOpenTask={onOpenTask} />}
   </div>
 }

@@ -18,9 +18,10 @@ const data = { weeks: 4, start_date: '2026-12-07', end_date_exclusive: '2027-01-
 
 test('overview, trends and category tables render API values with units and explicit limits', () => {
   const html = render(AnalyticsContent, { data })
-  for (const text of ['计划任务', '2 项', '确认完成', '1 项', '120 分钟', '90 分钟', '当前已取消（全库）', '暂无可靠分母', '最近 4 周趋势', '自定义工程', '100.0%', '北京时间', '结束日不含', '每周真实记录', '不重复累计计时器']) assert.ok(html.includes(text), text)
+  for (const text of ['计划任务', '2 项', '确认完成', '1 项', '120 分钟', '90 分钟', '最近 4 周趋势', '自定义工程', '100.0%', '2026-12-07 至 2027-01-03', '每周真实记录']) assert.ok(html.includes(text), text)
   assert.ok(html.includes('每周确认完成按周查看'))
   assert.ok(html.includes('<caption>类别投入与确认完成</caption>'))
+  for (const text of ['仅统计可执行任务', '归属按反馈当时的类别标识', '点击周标签查看记录情况', '统计口径与数据质量', 'analytics-definitions', '当前已取消（全库）', '不重复累计计时器']) assert.ok(!html.includes(text), text)
 })
 
 test('unknown, partial coverage and legitimate zero never share the same display', () => {
@@ -30,20 +31,23 @@ test('unknown, partial coverage and legitimate zero never share the same display
   assert.equal(minutesText(null, 30, 1), '已知 30 分钟（不完整）')
   const changed = { ...data, overview: { ...week, actual_minutes: null, unknown_actual_count: 1, known_actual_minutes: 30 } }
   const html = render(AnalyticsContent, { data: changed })
-  assert.ok(html.includes('未知不等于0'))
+  assert.ok(!html.includes('未知不等于0'))
+  assert.ok(!html.includes('条有效反馈未记录耗时'))
   assert.ok(html.includes('已知 30 分钟（不完整）'))
 })
 
 test('no history and insufficient paired samples show explicit empty and evidence states', () => {
   const empty = { ...week, completed_count: 0, feedback_count: 0, planned_task_count: 0, actual_minutes: null, known_actual_minutes: 0, planned_minutes: 0, data_state: 'no_records' }
   const html = render(AnalyticsContent, { data: { ...data, overview: empty, totals: empty, weekly: [empty], categories: [] } })
-  for (const text of ['没有可统计的安排或执行反馈', '暂无类别执行记录', '样本不足', '至少 3 项', '不推断效率或未来趋势']) assert.ok(html.includes(text), text)
+  for (const text of ['没有可统计的安排或执行反馈', '暂无类别执行记录', '样本不足（1 / 3 项）']) assert.ok(html.includes(text), text)
 })
 
 test('estimation uses supplied paired task facts and signed weighted deviation', () => {
   const task = { task_id: 4, title: '子任务实现', category_name: '工程', estimated_minutes: 90, actual_minutes: 110, difference_minutes: 20 }
   const html = render(AnalyticsContent, { data: { ...data, estimation: { ...estimation, estimated_minutes: 90, actual_minutes: 110, difference_minutes: 20, deviation_ratio: 20 / 90, tasks: [task], excluded_unknown_time: 2 } } })
-  for (const text of ['子任务实现', '+20 分钟', '22.2%', '全过程耗时完整', '包含更早周', '合计偏差 ÷ 原始估时合计', '耗时不完整 2 项', '最多 20 项']) assert.ok(html.includes(text), text)
+  for (const text of ['子任务实现', '+20 分钟', '22.2%', '最多 20 项']) assert.ok(html.includes(text), text)
+  assert.ok(!html.includes('已排除耗时不完整'))
+  assert.ok(!html.includes('原始估时不可比较'))
   assert.equal(signedText(0), '0'); assert.equal(signedText(-5), '-5'); assert.equal(signedText(null), '—')
   assert.equal(percentText(null), '—')
 })
@@ -52,7 +56,7 @@ test('goals distinguish minutes from counts and preserve cancelled children in p
   const goals = [{ goal_id: 1, goal_title: '每周项目交付', metric_kind: 'deliverable', actual: 1, known_actual: 1, target: 3, unit_label: '项', status: 'active', linked_task_count: 3, linked_done_count: 1, linked_cancelled_count: 1 }, { goal_id: 2, goal_title: '阅读时间', metric_kind: 'time', actual: null, known_actual: 40, unknown_actual_count: 1, target: 120, unit_label: '分钟', status: 'active', linked_task_count: 1, linked_done_count: 0, linked_cancelled_count: 0 }]
   const parentTasks = [{ id: 9, title: '项目容器', progress: { completed_children: 1, total_children: 3, cancelled_children: 1 } }]
   const html = render(AnalyticsContent, { data: { ...data, goals }, parentTasks })
-  for (const text of ['1 / 3 项', '未知 / 120 分钟', '已知小计 40 分钟', '项目容器', '取消仍在分母', '父容器不额外贡献工作量']) assert.ok(html.includes(text), text)
+  for (const text of ['1 / 3 项', '未知 / 120 分钟', '已知小计 40 分钟', '项目容器', '1 / 3 项完成，1 项取消']) assert.ok(html.includes(text), text)
   assert.equal((html.match(/aria-label="阅读时间本周进展"/g) || []).length, 0)
 })
 

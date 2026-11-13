@@ -16,8 +16,8 @@ from ..codex.chat_intents import natural_operation, protection_request, READ_TOO
 
 READ_TOOLS = frozenset({'tasks', 'goals', 'preferences', 'calendar', 'review', 'memories'}) | CHAT_READ_TOOLS
 CAPABILITIES = {
-    'schedule': READ_TOOLS | {'planning_draft', 'edit_draft'},
-    'task': READ_TOOLS | {'planning_draft', 'breakdown_draft', 'profile_draft', 'feedback_draft', 'edit_draft'},
+    'schedule': READ_TOOLS | {'planning_draft', 'edit_draft', 'split_draft'},
+    'task': READ_TOOLS | {'planning_draft', 'breakdown_draft', 'profile_draft', 'feedback_draft', 'edit_draft', 'split_draft'},
     'review': READ_TOOLS | {'review_draft', 'edit_draft'},
     'memory': frozenset({'memories', 'preferences', 'memory_suggestion'}),
     'query': READ_TOOLS,
@@ -69,10 +69,12 @@ def _operation(text):
         return 'schedule'
     if re.search(r'(创建|新建|新增|修改|调整|更新).*(任务|作业)|^创建\d+分钟任务', text):
         return 'create_task'
+    if re.search(r'(?:我|我们)(?:今天|明天|今晚|明晚|本周|下周)?(?:要|准备|打算|计划).{0,16}(?:写|读|学习|复习|背|整理|完成|练习)|(?:今天|明天|今晚|明晚|明早).{0,12}(?:早读|读书|复习|写作业|写报告|整理笔记)', text):
+        return 'schedule'
     return None
 
 
-def select_skills(text, history=(), current_drafts=()):
+def select_skills(text, history=(), current_drafts=(), *, mode=None):
     current = active_text(text)
     if current!=text.strip() and (not current or re.search(r'是什么意思|怎么理解|这句话|这段话',current)):
         return Selection(('chat',),'chat',frozenset(),reason='quoted_discussion')
@@ -110,6 +112,22 @@ def select_skills(text, history=(), current_drafts=()):
     # "帮我看看今天任务" has no write authorization, unlike "看看并生成草案".
     if readonly and not re.search(r'(生成|创建|新建|新增|修改|调整|规划|排程|整理为|排进|安排一下|帮我安排|拆解|帮我复盘)', current):
         operation = 'query'
+    if (operation is None and mode == 'plan'
+        and re.search(r'作业|报告|论文|笔记|早读|读书|复习|[pP][pP][tT]', current)
+        and re.search(r'今天|明天|今晚|明晚|明早|分钟|小时|准备|打算', current)
+        and not re.search(r'怎么|如何|建议|思路|方法|解释|讨论', current)):
+        operation = 'schedule'
+    draft_request = bool(re.search(r'(生成|创建|新建|给我|做一份|整理成|整理为).{0,12}(草案|初稿)', current))
+    if operation is None and draft_request:
+        operation = {'plan':'schedule', 'review':'review', 'profile':'profile'}.get(mode)
+        if operation is None:
+            for item in list(history)[-8:][::-1]:
+                if item.get('role') != 'user':continue
+                prior = select_skills(item.get('text', ''))
+                if prior.expected:
+                    operation = prior.operation;break
+                if re.search(r'换个话题|不安排|先不要', item.get('text', '')):break
+        operation = operation or 'schedule'
     inherited = False
     if operation is None and re.fullmatch(r'(大概|大约|预计|需要|要|今晚|今天|明天|本周|下周|周[一二三四五六日天]|\d|[一二三四五六七八九十半个小时分钟点前完成：:，,。\s])+', current):
         # Only short answers to an unresolved, same-conversation workflow inherit
@@ -132,6 +150,7 @@ def select_skills(text, history=(), current_drafts=()):
     allowed = frozenset().union(*(CAPABILITIES[name] for name in names))
     expected = RESULT_KIND.get(operation)
     allowed = READ_TOOLS | {WRITE_TOOL[expected], 'edit_draft'} if expected and expected != 'memory' else allowed
+    if expected=='planning':allowed=allowed|{'split_draft'}
     if operation == 'manage_memory':allowed = frozenset({'memories', 'preferences'})
     return Selection(names, operation, frozenset(allowed), expected, 'user_followup' if inherited else 'draft_followup' if editing else 'current_message')
 
@@ -164,6 +183,7 @@ def validate_plan(plan, selection):
         if call.name not in selection.allowed:
             return 'MEMORY_EXPLICIT_INTENT_REQUIRED' if call.name=='memory_suggestion' and selection.operation=='chat' else 'TOOL_NOT_ALLOWED'
         if call.name == 'edit_draft' and call.arguments.get('kind') != selection.expected:return 'TOOL_NOT_ALLOWED'
+        if call.name == 'split_draft' and selection.expected!='planning':return 'TOOL_NOT_ALLOWED'
     return None
 
 

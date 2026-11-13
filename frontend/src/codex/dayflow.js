@@ -10,6 +10,10 @@ export const groups=[
  {id:'markers',name:'截止与目标',color:'#bb6272'},
 ]
 export const calendarGroup=kind=>kind==='formal_task'?'tasks':['course','course_snapshot'].includes(kind)?'courses':kind==='protected'?'protected':['deadline','goal'].includes(kind)?'markers':'personal'
+export function calendarEventsWithPreview(events,preview){
+ const replaced=new Set(preview?.taskIds||[])
+ return [...events.filter(event=>event.kind!=='formal_task'||!replaced.has(event.task_id)||Date.parse(event.start)<Date.parse(preview?.asOf)),...(preview?.events||[])]
+}
 export function toDayFlowEvent(event){
  const allDay=Boolean(event.allDay)
  const start=allDay?Temporal.PlainDate.from(event.start):Temporal.Instant.from(event.start).toZonedDateTimeISO('Asia/Shanghai')

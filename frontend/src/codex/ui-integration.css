@@ -64,6 +64,13 @@
 .button-row { gap:8px }
 .growth-section,.panel,.workspace-draft { border-color:var(--sga-border);border-radius:12px }
 .form-grid .sga-input,.growth-form .sga-input,.sga-textarea,.form-grid .sga-select { width:100% }
+.planning-split-controls { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px }
+.planning-split-controls .sga-input { width:100% }
+.planning-split-controls>.button { min-height:44px }
+.draft-result-preview fieldset { border:0;padding:0;margin:0;min-width:0 }
+.draft-result-preview .form-grid { grid-template-columns:minmax(0,1fr) }
+#v2-auxiliary-shared .review-draft-reading { padding:20px;overflow-wrap:anywhere }
+.dayflow-canvas [data-event-id^="draft-preview:"] { border-style:dashed }
 .editor .sga-button,.growth-form .sga-button { align-self:start }
 .dayflow-editor-fields { display:grid;gap:14px;min-width:0;border:0;padding:0;margin:0 }
 .dayflow-editor-fields label { display:grid;gap:6px;font-size:14px }
@@ -71,6 +78,24 @@
 .dayflow-time-fields { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px }
 .sga-dialog-close { position:absolute;right:12px;top:12px }
 .sga-dialog-body { display:grid;gap:16px;min-width:0 }
+.sga-dialog-body.task-detail-drawer { left:auto;right:0;top:0;bottom:0;transform:none;width:min(640px,100%);max-width:100%;max-height:100dvh;height:100dvh;border-radius:0;padding:24px;box-sizing:border-box;align-content:start;overflow-y:auto;overscroll-behavior:contain }
+.task-detail-drawer .task-execution-card { padding:0;border:0;box-shadow:none;background:transparent;min-width:0 }
+.task-detail-drawer .item-top h4 { margin:0;overflow-wrap:anywhere;font-size:20px }
+.task-detail-drawer .details { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:20px }
+.task-detail-drawer .details div { min-width:0 }
+.task-detail-drawer .details dd,.task-detail-drawer .description { overflow-wrap:anywhere }
+.task-detail-drawer .section-heading { margin:0 0 16px;gap:12px;align-items:center }
+.task-detail-drawer .section-heading h2 { font-size:16px;margin:0 }
+.task-detail-drawer .task-schedule-details { margin:20px 0 }
+.task-schedule-details h5 { font-size:14px;margin:0 0 8px }
+.task-schedule-details ul { padding-left:20px;margin:0;line-height:1.8 }
+.task-detail-drawer .button-row,.task-detail-drawer .work-timer-row { flex-wrap:wrap }
+@media(max-width:600px){
+ .sga-dialog-body.task-detail-drawer { padding:20px 16px max(24px,env(safe-area-inset-bottom)) }
+ .task-detail-drawer .form-grid { grid-template-columns:minmax(0,1fr) }
+ .task-detail-drawer .span-two { grid-column:auto }
+ .task-detail-drawer .button-row>.sga-button { white-space:normal;min-height:44px }
+}
 [data-slot=dialog-content] input,[data-slot=dialog-content] select,[data-slot=dialog-content] textarea { max-width:100% }
 .sga-page-title { margin:0;font-size:24px;line-height:1.4 }
 .dayflow-workspace[data-compact] { container-type:inline-size;border:0;border-radius:0 }

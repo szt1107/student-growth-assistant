@@ -63,13 +63,16 @@ python scripts/migrate.py
 打开两个终端，在根目录分别执行：
 
 ```powershell
-# 终端一
+# 终端一，正常模式使用真实北京时间和默认个人数据库
+$env:SGA_DEMO='0'
+$env:SGA_DATABASE_PATH=Join-Path $PWD 'backend/data/app.db'
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 # 终端二
+$env:VITE_API_BASE_URL='http://127.0.0.1:8000'
 npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-上述命令使用当前激活的 Python 环境。匿名演示 PowerShell 启动器需要 `app_env`，也可以按 [演示文档](docs/demo.md) 手动启动。
+上述后端命令使用当前激活的 Python 项目环境，并显式选择正常模式。前端连接 8000 端口。匿名演示启动器使用 `app_env`，启动方式与固定场景时间见 [演示文档](docs/demo.md)。
 
 页面：http://localhost:5173/ ，API 文档：http://127.0.0.1:8000/docs 。正常模式使用真实北京时间和 `backend/data/app.db`，启动时检查 Alembic 版本；显式升级和恢复见 [数据库说明](docs/database.md)。
 
@@ -135,7 +138,7 @@ docs/                    现行架构、API、数据库、演示、协作说明
 
 [阶段 2 任务拆解与层级验收](docs/archive/阶段2任务拆解与层级管理验收.md)：仅支持父容器和子任务两级，每个父任务最多 20 项。建议顺序不是强制依赖；草案确认创建任务后，需另行生成并采用日程。该记录对应当时的 `0002_task_hierarchy` 与 JSON v2；当前迁移 head 为 `0006_calendar`，JSON 导出为 v6。
 
-[阶段 3 成长统计与可视化验收](docs/archive/阶段3成长统计与可视化验收.md)：统计直接读取有效执行反馈与当前正式计划，排除父容器和已撤回反馈，不重复加计时器；无需 AI。缺少可靠历史分母与取消时间日志，因此不显示历史完成率或周取消事件数；只单列全库当前取消状态数。本阶段无数据库结构或依赖变更。
+[阶段 3 成长统计与可视化验收](docs/archive/阶段3成长统计与可视化验收.md)记录了统计接口和当时界面的验收。统计读取有效执行反馈与当前正式计划，排除父容器和已撤回反馈，按已知记录展示投入与完成情况。本阶段无数据库结构或依赖变更。
 
 [阶段 4 性能与工程质量验收](docs/archive/阶段4性能与工程质量验收.md)：先测量再复用搜索中的重复评分，保留原策略、预算、候选与独立校验；新增可重复基准、CI、固定测试时钟及跨阶段匿名集成演示。
 

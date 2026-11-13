@@ -33,7 +33,7 @@ function describeRule(rule) {
   return parameters.text || rule.description || '只供 AI 参考，不直接参与排程'
 }
 
-export default function MyProfilePage({ active = true, refreshVersion = 0, auxiliaryTarget = null, recoveryWorkspace, onDataChanged, onBusinessChat, onReturnChat, resource, onOpenConversation, primaryActive=active }) {
+export default function MyProfilePage({ active = true, refreshVersion = 0, auxiliaryTarget = null, recoveryWorkspace, onDataChanged, onReturnChat, resource, onOpenConversation, primaryActive=active }) {
   const confirmAction = useConfirmation()
   const [section,setSection]=useState('goals'),[memoryVisited,setMemoryVisited]=useState(false)
   const [managementGroup,setManagementGroup]=useState(null)
@@ -184,7 +184,7 @@ export default function MyProfilePage({ active = true, refreshVersion = 0, auxil
   const weekdays = ruleForm.weekdays
   return <><Tabs asChild value={section} onValueChange={key=>{setSection(key);setNotice('');setError('');if(key==='memories')setMemoryVisited(true)}}><section className="growth-page profile-page" aria-labelledby="profile-heading">
     {onReturnChat&&<Button className="button subtle" onClick={onReturnChat}>返回相关对话</Button>}
-    <header className="profile-intro"><div><h2 id="profile-heading">我的档案</h2><p>明确长期方向，让每次安排更贴合自己。</p></div>{onBusinessChat&&<Button className="button secondary" onClick={onBusinessChat}>用 AI 整理档案</Button>}</header>
+    <header className="profile-intro"><div><h2 id="profile-heading">我的档案</h2></div></header>
     <div className="profile-toolbar"><TabsList className="profile-sections flex-nowrap" aria-label="档案分区">{[['goals','成长目标'],['preferences','安排偏好'],['memories','长期记忆'],['more','更多管理']].map(([key,label])=><TabsTrigger className="whitespace-nowrap px-2 max-sm:text-[13px]" key={key} value={key} id={"profile-tab-"+key} aria-controls={"profile-panel-"+key}>{label}</TabsTrigger>)}</TabsList></div>
     {memoryVisited&&<div role="tabpanel" id="profile-panel-memories" aria-labelledby="profile-tab-memories" hidden={section!=='memories'} inert={section!=='memories'}><MemoryPanel workspace={recoveryWorkspace} active={primaryActive&&section==='memories'} resource={resource} onSource={onOpenConversation} onPreferences={()=>setSection('preferences')}/></div>}
     <EditRecovery recovery={recovery} label="目标与偏好编辑"/><EditRecovery recovery={sectionRecovery} label="档案分区"/>

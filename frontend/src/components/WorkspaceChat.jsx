@@ -8,7 +8,7 @@ import EditRecovery, { useEditRecovery } from './EditRecovery.jsx'
 import ChatComposer from '../codex/ChatComposer.jsx'
 const labels = { profile: '档案助手', review: '复盘助手' }
 
-export default function WorkspaceChat({ scope, weekStart, onAdjustTask, onDraftConfirmed, observe = true, workspace }) {
+export default function WorkspaceChat({ scope, weekStart, onAdjustTask, onDraftConfirmed, onDraftPreview, observe = true, workspace }) {
   const [session, setSession] = useState(null)
   const [data, setData] = useState(null)
   const [text, setText] = useState('')
@@ -23,6 +23,12 @@ export default function WorkspaceChat({ scope, weekStart, onAdjustTask, onDraftC
   observing.current = observe
   const initialization=useRef(null), pollGeneration=useRef(0)
   const requestId = useRef(null)
+  const previewKind=scope==='profile'?'profile':'feedback',previewId=data?.draft?.id
+  useEffect(()=>{
+    if(!observe||!data?.draft)return
+    onDraftPreview?.({...data.draft,kind:previewKind,status:'ready',content:{operations:data.draft.operations||[]}}, {kind:previewKind,id:previewId})
+  },[observe,data?.draft,onDraftPreview,previewKind,previewId])
+  useEffect(()=>()=>{if(previewId)onDraftPreview?.(null,{kind:previewKind,id:previewId})},[observe,onDraftPreview,previewKind,previewId])
   const recovery = useEditRecovery({ workspace: workspaceId, resource: `tool:${session?.id}:input`, base: data ? scope : undefined,
     value: {text, requestId: requestId.current}, dirty: Boolean(text), automatic: true,
     restore: value => {setText(value.text);requestId.current=value.requestId||null} })

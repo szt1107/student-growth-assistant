@@ -54,7 +54,7 @@ def test_minimal_draft_is_editable_but_placeholder_not_confirmable(client,defaul
     ref=ref_of(send(client,defaults_chat,'帮我安排一下学习'))
     assert ref['content']['schedule']['duration_minutes']==60
     assert ref['content']['schedule']['title']=='待命名任务'
-    assert ref['content']['schedule']['start_time']=='09:00'
+    assert ref['content']['schedule']['start_time']=='18:00'
     assert len(ref['unresolved'])==2
 
 
@@ -177,7 +177,7 @@ def test_business_receipt_keeps_draft_query_and_context_without_second_narration
     monkeypatch.setattr(conversation_tools,'plan',planning)
     monkeypatch.setattr(conversation_runs,'reply_events',partial)
     result=send(client,defaults_chat,'今晚安排操作系统作业，90分钟')
-    assert result['status']=='completed' and '已生成' in result['delta'] and '尚未' in result['delta']
+    assert result['status']=='completed' and '已生成' in result['delta'] and '确认后才会保存' in result['delta']
     assert result['content']['tools'][0]['tool']=='tasks'
     ref=result['content']['tools'][1]['draft']
     assert ref['id']>0 and call(client,'/api/tasks')==[]
@@ -273,3 +273,44 @@ def test_task_model_cannot_invent_child_deadline_when_user_gave_none(client,defa
     monkeypatch.setattr(conversation_tools,'plan',choose);monkeypatch.setattr(assistant_ai,'decompose_task',invent)
     ref=ref_of(send(client,defaults_chat,'帮我拆解报告'))
     assert ref['content']['children']==[] and ref['content']['parent']['deadline'] is None
+
+
+def test_past_fixed_start_is_not_silently_advanced(client, defaults_chat):
+    draft = ref_of(send(client, defaults_chat, '今天必须9点开始整理笔记，60分钟，帮我安排'))
+    assert draft['content']['schedule']['start_exact']
+    assert draft['content']['schedule']['start_time'] == '09:00'
+    assert draft['status'] == 'conflict' and not draft['items']
+    assert any(problem['code'] == 'START_IN_PAST' for problem in draft['problems'])
+    assert call(client, '/api/tasks') == []
+
+
+def test_flexible_preview_replaces_an_existing_fixed_start(client, defaults_chat, test_engine):
+    from sqlalchemy.orm import Session
+    from app.models import TaskSchedulingProfile
+
+    task = call(client, '/api/tasks', {'title': '整理笔记', 'duration_minutes': 60,
+        'deadline': '2026-10-15T22:00:00+08:00'})
+    with Session(test_engine) as db:
+        db.add(TaskSchedulingProfile(task_id=task['id'], settings={
+            'fixed_start': '2026-10-15T19:00:00+08:00'}))
+        db.commit()
+    draft = ref_of(send(client, defaults_chat, '周四上午整理笔记，帮我安排'))
+    assert draft['status'] == 'ready' and draft['content']['schedule']['task_id'] == task['id']
+    assert draft['items'] and all(item['end_at'][11:16] <= '12:00' for item in draft['items'])
+
+
+def test_manual_segments_require_an_explicit_period_override(client, defaults_chat):
+    draft = ref_of(send(client, defaults_chat, '周四上午整理笔记80分钟，可以分两段，帮我安排'))
+    content = draft['content']
+    content['schedule']['work_segments'] = [
+        {'start_at': '2026-10-15T19:00:00+08:00', 'end_at': '2026-10-15T19:40:00+08:00'},
+        {'start_at': '2026-10-15T20:00:00+08:00', 'end_at': '2026-10-15T20:40:00+08:00'},
+    ]
+    result = client.patch(f"/api/workspace/drafts/planning/{draft['id']}",
+        json={'expected_version': draft['version'], 'content': content})
+    assert result.status_code == 422
+    content['schedule']['time_period'] = None
+    updated = client.patch(f"/api/workspace/drafts/planning/{draft['id']}",
+        json={'expected_version': draft['version'], 'content': content})
+    assert updated.status_code == 200 and updated.json()['items']
+    assert call(client, '/api/tasks') == []

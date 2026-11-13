@@ -13,7 +13,7 @@ const navigationIcons = {
 }
 
 // Full pages stay in the primary area. Shared draft previews live in the auxiliary pane.
-export default function WorkspaceShell({ state, dispatch, chat, children, review, profile, clock, conversationContent, auxiliarySchedule, draftPanel, draftPage, chatNote = null }) {
+export default function WorkspaceShell({ state, dispatch, chat, children, review, profile, clock, conversationContent, auxiliarySchedule, auxiliaryPreview, previewPage, draftPanel, draftPage, chatNote = null }) {
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches)
   const [gridWidth, setGridWidth] = useState(1440)
   const [auxiliaryTarget, setAuxiliaryTarget] = useState(null)
@@ -162,7 +162,8 @@ export default function WorkspaceShell({ state, dispatch, chat, children, review
       })}
       <div id="v2-auxiliary-shared" className="v2-tool-page" data-placement="auxiliary" role="tabpanel" aria-labelledby={'v2-tab-' + state.auxiliaryPage} hidden={!visible.auxiliary} inert={!visible.auxiliary}>
         <div hidden={state.auxiliaryPage !== 'schedule'} inert={state.auxiliaryPage !== 'schedule'}>{auxiliarySchedule}</div>
-        <div ref={setAuxiliaryTarget} />
+        {previewPage===state.auxiliaryPage&&auxiliaryPreview}
+        <div ref={setAuxiliaryTarget} hidden={Boolean(auxiliaryPreview&&previewPage===state.auxiliaryPage)} inert={Boolean(auxiliaryPreview&&previewPage===state.auxiliaryPage)}/>
       </div>
     </div>
   </div>

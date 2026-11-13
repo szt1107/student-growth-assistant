@@ -58,7 +58,7 @@ def time_rules(db, include_calendar=True, calendar_entries=None):
     entries=list(db.scalars(select(CalendarEntry)).all()) if calendar_entries is None else calendar_entries
     rules=[TimeRuleInput(id=r.id,kind=r.kind.value,title=r.title,recurrence=r.recurrence.value,start_time=r.start_time,end_time=r.end_time,weekday=r.weekday,date=r.date,active=r.active,
         excluded_dates=tuple(e.source_date for e in entries if e.source_rule_id==r.id)) for r in db.scalars(select(TimeRule)).all()]
-    return rules+calendar_rules(entries) if include_calendar else rules
+    return rules+calendar_rules(entries, {rule.id for rule in rules if rule.kind == 'course'}) if include_calendar else rules
 
 
 def baseline(db,week):
@@ -85,7 +85,7 @@ def merge_actions(base,incoming):
     return result
 
 
-def proposed_world(db,week,actions,previous_override=None):
+def proposed_world(db,week,actions,previous_override=None,*,include_unplanned=True):
     tasks={t['ref']:deepcopy(t) for t in task_library(db)}
     questions=[]; focus=set()
     confirmed_remaining={a.get('target') for a in actions if 'duration_minutes' in a.get('fields',{})}
@@ -127,6 +127,10 @@ def proposed_world(db,week,actions,previous_override=None):
     relevant=[]; retained=[]; notices=[]; pending_work=[]
     for ref,t in tasks.items():
         segments=byold.get(ref,[])
+        # A single-task preview still accounts for every existing arrangement,
+        # while unrelated backlog stays available for an explicit planning run.
+        if not include_unplanned and ref not in focus and not segments:
+            continue
         old=next((x for x in segments if interval(x)[1]>now),None)
         elapsed=[x for x in segments if interval(x)[1]<=now]
         retained.extend(elapsed)
@@ -184,7 +188,7 @@ def world_rules(db,world,blocked_windows=None):
     return rules
 
 
-def build_proposal(db,week,actions,questions=None,preferences=None,strategy='balanced',preference_updates=None,allow_replan=False,temporary_preferences=None,previous_override=None,expanded=False,expansion_from=None):
+def build_proposal(db,week,actions,questions=None,preferences=None,strategy='balanced',preference_updates=None,allow_replan=False,temporary_preferences=None,previous_override=None,expanded=False,expansion_from=None,include_unplanned=True):
     for action in actions:
         key=(action.get('fields') or {}).get('task_type')
         if key:
@@ -192,7 +196,7 @@ def build_proposal(db,week,actions,questions=None,preferences=None,strategy='bal
     for key in (preference_updates or {}).get('task_windows', {}):
         if key != '*':
             validate_category(db,key)
-    world=proposed_world(db,week,actions,previous_override)
+    world=proposed_world(db,week,actions,previous_override,include_unplanned=include_unplanned)
     qs=list(dict.fromkeys((questions or [])+world['questions']))
     temporary_preferences=temporary_preferences or {}
     for block in temporary_preferences.get('blocked_windows',[]):
@@ -215,6 +219,7 @@ def build_proposal(db,week,actions,questions=None,preferences=None,strategy='bal
             if fact['rule_source']=='in_memory_constraint':
                 fact['blocking_ref']=f"constraint:{fact.pop('time_rule_id')}"
     payload['replanning']=scope
+    payload['include_unplanned']=include_unplanned
     if qs or (not actions and not allow_replan):
         payload['status']='needs_input'
         if not qs: payload['questions']=['请输入任务，或使用手动任务卡片。']

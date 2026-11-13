@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from ..models import AssistantSession, AssistantRun, AssistantMessage, GrowthChangeDraft, Task, GrowthGoal, MemoryEntry
 from ..secretary_schemas import LookupArgs,MemoryContent
-from ..workspace_schemas import ToolPlan, ToolCall, RangeArgs, PlanningArgs, BusinessArgs, EditToolArgs, ReviewToolArgs, ReviewDraftCreate
+from ..workspace_schemas import ToolPlan, ToolCall, RangeArgs, PlanningArgs, BusinessArgs, EditToolArgs, SplitToolArgs, ReviewToolArgs, ReviewDraftCreate
 from ..task_breakdown_schemas import BreakdownCreate
 from . import claude_client
 from .conversations import local_owner,error,ensure_available
@@ -68,40 +68,52 @@ def execution_receipt(results, previous):
     labels={'planning':'日程方案','breakdown':'任务拆解','profile':'档案修改','feedback':'执行反馈','review_record':'复盘记录'}
     for draft in drafts:
         kind=draft['kind'];old=before.get((kind,draft['id']));status=draft['status']
+        value=draft.get('content',{}).get('schedule')
+        problems=[problem for problem in draft.get('problems',[]) if not (
+            problem['code']=='DEADLINE_REQUIRED' and value and any(
+                item['ref']==draft.get('schedule_target') for item in draft.get('items',[])))]
+        lines.extend(draft.get('schedule_adjustments',[]))
         action='已生成可编辑的' if old is None else '已更新同一份' if old['version']!=draft['version'] else '已读取当前'
         if status=='applied':lines.append(f'当前{labels[kind]}已采用，本轮没有重复保存。');continue
         lines.append(f'{action}{labels[kind]}。')
-        value=draft.get('content',{}).get('schedule')
-        if value:
-            old_value=(old or {}).get('content',{}).get('schedule',{})
-            if old_value:
-                changed=[label for key,label in [('title','任务名称'),('start_time','开始时间'),('day','日期'),('duration_minutes','工作时长'),('segments','分段'),('break_minutes','段间休息'),('deadline','截止时间')] if old_value.get(key)!=value.get(key)]
-                if changed:lines.append('修改了'+ '、'.join(changed)+'。')
-            lines.append(f"任务：{value['title']}；工作时长：{value['duration_minutes']}分钟。")
-            items=[item for item in draft.get('items',[]) if item['ref']==draft.get('schedule_target')]
+        if kind=='planning':
             from .assistant_clock import SHANGHAI
-            for item in items:
-                start=datetime.fromisoformat(item['start_at']).astimezone(SHANGHAI)
-                end=datetime.fromisoformat(item['end_at']).astimezone(SHANGHAI)
-                lines.append(f"候选安排：{start:%Y-%m-%d %H:%M} 至 {end:%Y-%m-%d %H:%M}。")
-            if not items:lines.append('当前没有找到可用安排，请核对冲突或调整时间。')
-            if value.get('deadline'):lines.append(f"截止时间：{datetime.fromisoformat(value['deadline']).astimezone(SHANGHAI):%Y-%m-%d %H:%M}。")
+            tasks=draft.get('task_details',[])
+            if value:tasks=[{'ref':draft.get('schedule_target'),**value}]
+            for task in tasks:
+                items=[item for item in draft.get('items',[]) if item['ref']==task['ref']]
+                times=[]
+                for item in items:
+                    start=datetime.fromisoformat(item['start_at']).astimezone(SHANGHAI)
+                    end=datetime.fromisoformat(item['end_at']).astimezone(SHANGHAI)
+                    weekday='一二三四五六日'[start.weekday()]
+                    times.append(f'{start.month}月{start.day}日（周{weekday}）{start:%H:%M}–{end:%H:%M}')
+                if times:lines.append(f"“{task['title']}”安排在{'、'.join(times)}，共{task['duration_minutes']}分钟。")
+            if not draft.get('items') and not problems and not draft.get('unresolved'):
+                lines.extend(draft.get('questions',[]) or ['当前没有找到可用安排，请调整日期或时间后再试。'])
         elif kind=='review_record':
             content=draft['content']
             last=(datetime.fromisoformat(content['end_date'])-timedelta(days=1)).date()
             lines.append(f"{content['title']}（{content['start_date']} 至 {last}）。")
             if content.get('summary'):lines.append(content['summary'][:600])
-        if status in ('stale','superseded','discarded'):lines.append('这份草案当前不可采用，请重新读取最新状态。')
-        elif status in ('conflict','no_plan'):lines.append('当前方案存在冲突或未找到可行安排，尚不能确认采用。')
-        lines.extend(draft.get('unresolved',[]))
-        lines.extend(draft.get('notices',[]))
+        if problems:
+            for problem in problems:lines.extend([problem['message'],problem['suggestion']])
+        else:
+            if status in ('stale','superseded','discarded'):lines.append('这份草案当前不可采用，请重新读取最新状态。')
+            elif status in ('conflict','no_plan'):lines.append('当前方案存在冲突或未找到可行安排，尚不能确认采用。')
+            if not draft.get('problems'):lines.extend(draft.get('unresolved',[]))
+            if kind!='planning':lines.extend(draft.get('notices',[]))
     for result in results:
         if result.get('memory') and not result.get('error'):lines.append('已提出待审核的记忆建议，确认后才参与长期参考。')
         if result.get('error') and not result.get('recovered_by'):
             lines.append('本次操作未完成：'+result.get('message','工具执行失败，请核对后重试。'))
     if not lines:return None
-    if any(r.get('fallback') for r in results):lines.append('模型处理未完成，初稿使用了已知信息与标注的默认值。')
-    if any(d['status']!='applied' for d in drafts):lines.append('尚未保存正式修改，请展开聊天中的草案卡片审核并明确确认。')
+    complete_schedule=drafts and all(d['kind']=='planning' and
+        all(d.get('field_sources',{}).get(key)=='user_explicit' for key in ('title','day','duration_minutes')) and
+        d.get('field_sources',{}).get('start_time') in ('user_explicit','schedule_adjusted') for d in drafts)
+    if any(r.get('fallback') for r in results) and not complete_schedule:
+        lines.append('模型处理未完成，初稿使用了已知信息与标注的默认值。')
+    if any(d['status']!='applied' for d in drafts):lines.append('请查看草案，确认后才会保存。')
     elif not drafts:lines.append('本轮没有修改正式任务或日程。')
     return '\n'.join(dict.fromkeys(lines))
 PLANNER='''当前是工具选择阶段，不是面向用户的回答阶段。自然交流规范用于最终回答，此阶段严格只返回符合schema的JSON对象，不输出解释或对话。只能选择allowed_tools。
@@ -109,7 +121,10 @@ PLANNER='''当前是工具选择阶段，不是面向用户的回答阶段。自
 tasks/goals/memories使用lookup_schema的id/q/offset/limit；calendar/review使用start,end（上海日期，end不含）。日期工具优先按tool_schemas中的工具名查对应契约，不混用查询和草案字段。
 attention无参数，复用真实优先处理/空闲时段计算；time_rules使用lookup_schema查询课程和保护时间；task_execution使用lookup_schema，指定真实任务id读取反馈和计时状态，不带id查询当前活动计时。问先做什么先查attention；不能凭聊天猜优先级。课程规则不是普通记忆，profile_draft支持create_time_rule/update_time_rule。执行进度用feedback_draft，计时用其中work_timer。查询结果才能确定id时先读并continue_after_read=true，重名须询问，不猜id。
 planning_draft使用planning_schema；breakdown_draft使用breakdown_schema；review_draft使用review_schema。
+明确日期或星期必须按context.now换算为上海日期，并使用profile.allowed_windows限定在该日期。用户指定上午、中午、下午、晚上时，分别将允许窗口限定为08:00–12:00、12:00–14:00、14:00–18:00、18:00–22:00；schedule_preview使用time_period保留这一要求。9点、12点、14点、19点是各时段的默认建议起点，遇课程或正式占用后在同一时段内寻找完整空档。只有明确固定钟点才使用fixed_start或start_exact。指定时段放不下时返回具体原因，等待用户调整时段，不能自动换到晚上或另一天。preferred_windows用于允许窗口内的钟点偏好。不得因旧截止时间或旧安排换到另一天，不得自行延后已有截止时间。用户要求日期与真实截止时间矛盾时，保留两者并报告具体矛盾。只有用户明确要修改同一任务时才复用旧任务，不把同名的另一日活动自动当作旧任务修改。
+完整的新活动请求默认生成本次活动草案，同名旧任务不构成用户身份授权，不能继承其截止、锁定和时段限制。未给截止就留空，不虚构截止或要求用户修改无关旧任务。当前用户日期、开始时间和时长优先，无占用时采用原要求。有真实占用时让现有算法计算推荐时间，回复先说明具体占用，草案使用算法实际时间。
 profile_draft/feedback_draft使用operations，遵守business_operations。edit_draft只引用已协调的current_drafts及kind/id/version/content，保留用户其它编辑。
+split_draft使用split_schema，引用已协调的日程草案id/version/content与目标target，先在content中设置segments或profile.segment_count，默认2段。工具按真实空档计算各段起止，允许不等长，不猜时间。
 memory_suggestion使用memory_schema。没有权限时calls为空；缺必要字段只返回questions，不执行依赖答案的动作。
 每轮总计最多4个工具。需要查询结果才能决定时，只选择查询并设置continue_after_read=true，下一步读取previous_tool_results。普通查询无需继续。
 decision_feedback是服务端对未完成办事路径的一次纠正；不要重复已经成功的工具或创建第二份草案。'''
@@ -120,7 +135,7 @@ async def plan(request):
     from ..schemas import GrowthGoalCreate,GrowthGoalPatch,TaskFeedbackCreate,TimeRuleCreate,TimeRuleUpdate
     from .conversation_context import bounded_request
     request=bounded_request(request)
-    selection=ai_skills.select_skills(request['message'],request.get('history',[]),request.get('current_drafts',[]))
+    selection=ai_skills.select_skills(request['message'],request.get('history',[]),request.get('current_drafts',[]),mode=request.get('mode'))
     system,_=ai_skills.compose(selection,PLANNER)
     from ..codex.composer_modes import with_mode
     system = with_mode(system, request.get('mode'))
@@ -139,7 +154,7 @@ async def plan(request):
     data={**request,'draft_defaults':draft_defaults.DEFAULTS,'schedule_preview_schema':SchedulePreview.model_json_schema(),
         'allowed_tools':sorted(selection.allowed),'schema':schema,'planning_schema':PlanningArgs.model_json_schema(),
         'breakdown_schema':BreakdownCreate.model_json_schema(),'range_schema':RangeArgs.model_json_schema(),
-        'edit_schema':EditToolArgs.model_json_schema(),'goal_patch_schema':GrowthGoalPatch.model_json_schema(),
+        'edit_schema':EditToolArgs.model_json_schema(),'split_schema':SplitToolArgs.model_json_schema(),'goal_patch_schema':GrowthGoalPatch.model_json_schema(),
         'preference_patch_schema':PreferencePatch.model_json_schema(),
         'business_operations':{'create_goal':'op plus goal_schema fields','update_goal':'op, goal_id, fields matching goal_patch_schema',
             'create_time_rule':'op plus time_rule_schema fields；每天规则用7个weekly weekday 1..7；不得用ai_note替代硬占用',
@@ -153,14 +168,20 @@ async def plan(request):
         'lookup_schema':LookupArgs.model_json_schema(),'memory_schema':MemoryContent.model_json_schema(),'review_schema':ReviewToolArgs.model_json_schema(),
         'goal_schema':GrowthGoalCreate.model_json_schema(),'feedback_schema':TaskFeedbackCreate.model_json_schema(),
         'time_rule_schema':TimeRuleCreate.model_json_schema(),'time_rule_patch_schema':TimeRuleUpdate.model_json_schema()}
+    if selection.expected=='planning' and draft_defaults.independent_schedule(request['message'],assistant_now()):
+        value,sources=draft_defaults.schedule({'message':request['message']},assistant_now())
+        data.update(history=[],current_drafts=[],scheduling_intent={
+            'kind':'new_activity','user_fields':value.model_dump(mode='json'),'field_sources':sources})
+        system+='\n本轮服务端已识别为独立新活动，日期、开始时间、时长来自当前用户。调用planning_draft生成本次草案，不引用同名旧任务或历史草案的截止，不询问是否另建活动或延后旧截止。用户未提供截止时留空，真实占用由排程工具检查并推荐合法时间。'
     data['tool_schemas']={name:contract for name,contract in {
         'calendar':data['range_schema'],'review':data['range_schema'],
         'review_draft':data['review_schema'],'time_rules':data['lookup_schema'],
         'task_execution':data['lookup_schema'],'attention':{'type':'object','additionalProperties':False,'properties':{}}}.items() if name in selection.allowed}
     for key,tool in [('planning_schema','planning_draft'),('breakdown_schema','breakdown_draft'),('edit_schema','edit_draft'),
-        ('memory_schema','memory_suggestion'),('review_schema','review_draft')]:
+        ('split_schema','split_draft'),('memory_schema','memory_suggestion'),('review_schema','review_draft')]:
         if tool not in selection.allowed:data.pop(key,None)
     if 'planning_draft' not in selection.allowed:data.pop('schedule_preview_schema',None)
+    if 'split_draft' in selection.allowed:data['tool_schemas']['split_draft']=data['split_schema']
     if not selection.expected:data.pop('draft_defaults',None)
     if not selection.allowed.intersection({'profile_draft','feedback_draft'}):
         for key in ('business_operations','goal_schema','goal_patch_schema','feedback_schema','preference_patch_schema','time_rule_schema','time_rule_patch_schema'):data.pop(key,None)
@@ -212,7 +233,7 @@ def persist(engine,rid,token,**values):
         if not run or run.payload.get('token')!=token:return False
         run.payload={**run.payload,**values}
         output=db.get(AssistantMessage,run.payload['assistant_message_id'])
-        links=[*output.content.get('links',[]),*(link for result in run.payload.get('tool_results',[]) for link in result.get('links',[]))]
+        links=[*output.content.get('links',[]),*({**link,'source':'tool'} for result in run.payload.get('tool_results',[]) for link in result.get('links',[]))]
         links=list({(link.get('page'),link.get('kind'),link.get('id')):link for link in links}.values())
         output.content={**output.content,'tools':run.payload.get('tool_results',[]),
             'questions':run.payload.get('tool_questions',[]),
@@ -221,8 +242,60 @@ def persist(engine,rid,token,**values):
         return run.status=='running'
 
 
+def split_planning_draft(db,id,version,content,target):
+    """Explicit scheduling-agent action shared by draft buttons and tool edits."""
+    from copy import deepcopy
+    from datetime import time
+    from .assistant_clock import SHANGHAI
+    from .assistant_scheduler import dt
+    from ..workspace_schemas import SchedulePreview
+    from ..models import TaskSchedulingProfile
+    from ..assistant_schemas import Profile
+    draft=workspace_drafts.envelope(db,'planning',id)
+    if target not in {task['ref'] for task in draft['task_details']}:
+        error('INVALID_DRAFT','请选择这份草案中的任务。',422)
+    prepared=deepcopy(content)
+    if 'schedule' in prepared:
+        if target!=draft['schedule_target']:error('INVALID_DRAFT','任务引用与草案不一致。',422)
+        prepared['schedule']['work_segments']=[]
+        prepared['schedule']['min_block_minutes']=5
+        value=SchedulePreview.model_validate(prepared['schedule'])
+        if value.segments<2:error('INVALID_DRAFT','请将分段数设为2到8。',422)
+    else:
+        task=next(task for task in draft['task_details'] if task['ref']==target)
+        actions=prepared.setdefault('actions',[])
+        action=next((action for action in actions if action.get('target')==target),None)
+        if action is None:
+            action={'op':'update','target':target,'fields':{}}
+            actions.append(action)
+        fields=action['fields']
+        profile={**(task.get('profile') or {}),**fields.get('profile',{})}
+        profile={key:value for key,value in profile.items() if key in Profile.model_fields}
+        count=profile.get('segment_count') or 2
+        if type(count) is not int or not 2<=count<=8:error('INVALID_DRAFT','请将分段数设为2到8。',422)
+        windows=profile.get('preferred_windows') or profile.get('allowed_windows') or []
+        items=sorted((item for item in draft['items'] if item['ref']==target),key=lambda item:item['start_at'])
+        start=profile.get('fixed_start') or (items[0]['start_at'] if items else windows[0]['start_at'] if windows else None)
+        if not start:error('INVALID_DRAFT','请先填写开始时间中的日期。',422)
+        day=dt(start).date()
+        formal=db.get(TaskSchedulingProfile,int(target.split(':')[1])) if target.startswith('task:') else None
+        bounds=profile.get('allowed_windows') or (formal.settings.get('allowed_windows') if formal else None) or [
+            {'start_at':datetime.combine(day,time(8),SHANGHAI).isoformat(),
+                'end_at':datetime.combine(day,time(22),SHANGHAI).isoformat()}]
+        profile.update(splittable=True,segment_count=count,max_segments=count,min_block_minutes=5,allowed_windows=bounds)
+        fields['profile']=profile
+    result=workspace_drafts.edit(db,'planning',id,version,prepared)
+    resolved=result.get('id',id) if isinstance(result,dict) else id
+    return workspace_drafts.envelope(db,'planning',resolved)
+
+
 async def execute(db,run,call,index,*,fallback=False):
     name,args=call.name,call.arguments;key=f'tool:{run.id}:{index}'
+    if name in ('edit_draft','split_draft') and args.get('kind','planning')=='planning':
+        from .draft_defaults import independent_schedule
+        if independent_schedule(run.text,assistant_now()):
+            # A complete new occasion cannot authorize editing a guessed old draft.
+            name,args='planning_draft',{}
     from ..codex import chat_capabilities
     if name in chat_capabilities.READ_TOOLS:
         return chat_capabilities.read(db,name,args)
@@ -256,7 +329,8 @@ async def execute(db,run,call,index,*,fallback=False):
         rows=db.scalars(query.order_by(model.id.desc()).offset(values.offset).limit(values.limit+1)).all()
         items=[dict(id=r.id,title=r.title,status=r.status.value if hasattr(r.status,'value') else r.status,
             **({'minutes':r.duration_minutes,'deadline':r.deadline.isoformat(),'kind':r.task_kind} if name=='tasks' else {'weekly_target':r.weekly_target,'version':r.version,'due_date':r.due_date.isoformat() if r.due_date else None})) for r in rows[:values.limit]]
-        return {'items':items,'next_offset':values.offset+values.limit if len(rows)>values.limit else None,'source':'当前正式记录'}
+        return {'items':items,'next_offset':values.offset+values.limit if len(rows)>values.limit else None,'source':'当前正式记录',
+            'links':[{'page':'schedule','kind':'task','id':r.id,'label':'查看任务 '+r.title} for r in rows[:3]] if name=='tasks' else []}
     if name=='preferences':
         if args:error('INVALID_TOOL','偏好查询不接收额外参数。',422)
         from .taxonomy import rules_payload
@@ -290,19 +364,23 @@ async def execute(db,run,call,index,*,fallback=False):
         if 'actions' in args and (not isinstance(args['actions'],list) or any(not isinstance(a,dict) or not isinstance(a.get('fields',{}),dict) for a in args['actions'])):
             PlanningArgs.model_validate(args)
         from .conversation_context import context_for
-        from .draft_defaults import user_values, schedule
+        from .draft_defaults import user_values, schedule, independent_schedule
         request,_=context_for(db,run)
         references=refs_for(db,run.session_id)
         if run.text.startswith(('就用这个','按这个方案','就这样')):
             latest=next((r for r in references if r['kind']=='planning'),None)
             if latest:return {'draft':{'kind':'planning','id':latest['id']},'summary':'请打开最新草案使用明确确认入口；聊天不会自行保存。','status':latest['status']}
-        previews=[r for r in references if r['kind']=='planning' and r.get('content',{}).get('schedule') and r['status'] not in ('applied','discarded','superseded')]
+        independent=independent_schedule(run.text,assistant_now()) and len(args.get('actions',[]))<=1
+        previews=[] if independent else [r for r in references if r['kind']=='planning' and r.get('content',{}).get('schedule') and r['status'] not in ('applied','discarded','superseded')]
         if len(previews)>1:error('DRAFT_COORDINATION_REQUIRED','存在多份日程初稿，请先选择并打开要修改的草案。')
         partial=any(a.get('op')=='add' and not a.get('fields',{}).get('deadline') for a in args.get('actions',[]))
         if any(a.get('op')=='add' for a in args.get('actions',[])):
             trusted,_=schedule(request,assistant_now())
             partial=partial or not trusted.deadline
-        if previews or partial or not args.get('actions') and (not args or user_values(run.text,assistant_now()).get('title')):
+            actions=args.get('actions',[])
+            plain_task=len(actions)==1 and actions[0].get('op')=='add' and not (set(actions[0].get('fields',{}))-{'title','duration_minutes','deadline','priority','profile'})
+            partial=partial or plain_task and trusted.title!='待命名任务'
+        if independent or previews or partial or not args.get('actions') and (not args or user_values(run.text,assistant_now()).get('title')):
             from .schedule_preview import create
             base=previews[0] if previews else None
             if base and not any(r['kind']=='planning' and r['id']==base['id'] and r['version']==base['version'] for r in run.payload.get('draft_versions',[])):
@@ -313,7 +391,10 @@ async def execute(db,run,call,index,*,fallback=False):
                 defaults_applied=sorted(k for k,v in result['field_sources'].items() if v=='system_default'),
                 duration_minutes=value['duration_minutes'],hard_deadline_present=bool(value['deadline']),items=len(result['items']))
             return {'draft':{'kind':'planning','id':result['id']},'summary':result['summary'],'status':result['status']}
-        request=PlanningArgs.model_validate(args)
+        from .draft_defaults import constrain_actions
+        parsed=PlanningArgs.model_validate(args).model_dump(mode='json',exclude_unset=True)
+        parsed['actions']=constrain_actions(parsed.get('actions',[]),run.text,assistant_now())
+        request=PlanningArgs.model_validate(parsed)
         if request.questions:return {'questions':request.questions}
         if not request.actions and not request.replan:error('INVALID_TOOL','需要明确的任务修改或规划要求。',422)
         from ..routers.assistant import message
@@ -323,6 +404,13 @@ async def execute(db,run,call,index,*,fallback=False):
         result=await message(sid,MessageRequest(client_message_id=key,text=run.text,**{**request.model_dump(mode='json',exclude_unset=True),'replan':request.replan}),db)
         return {'draft':{'kind':'planning','id':result['id']},'summary':result['summary'],'status':result['status'],
             'questions':result.get('questions',[])}
+    if name=='split_draft':
+        values=SplitToolArgs.model_validate(args)
+        if not any(ref['kind']=='planning' and ref['id']==values.id and ref['version']==values.version
+            for ref in run.payload.get('draft_versions',[])):
+            error('DRAFT_COORDINATION_REQUIRED','请先读取最新草案并协调未保存编辑，再分段。')
+        result=await asyncio.to_thread(split_planning_draft,db,values.id,values.version,values.content,values.target)
+        return {'draft':{'kind':'planning','id':result['id']},'summary':'已按真实空档完成分段，等待审核确认。'}
     if name=='edit_draft':
         values=EditToolArgs.model_validate(args)
         allowed=run.payload.get('draft_versions',[])
@@ -330,7 +418,15 @@ async def execute(db,run,call,index,*,fallback=False):
             error('DRAFT_COORDINATION_REQUIRED','请先打开草案，处理未保存编辑并读取最新版本后再让AI修改。')
         latest=workspace_drafts.envelope(db,values.kind,values.id)
         if len(json.dumps(latest['content'],ensure_ascii=False))>10000:error('DRAFT_COORDINATION_REQUIRED','这份草案较长，请在工作区修改，避免省略字段被覆盖。')
-        db.rollback();result=workspace_drafts.edit(db,values.kind,values.id,values.version,values.content)
+        content=values.content
+        if values.kind=='planning':
+            from .draft_defaults import constrain_actions, schedule
+            if 'actions' in content:
+                content={**content,'actions':constrain_actions(content['actions'],run.text,assistant_now())}
+            elif 'schedule' in content:
+                updated,_=schedule({'message':run.text},assistant_now(),base=content['schedule'])
+                content={'schedule':updated.model_dump(mode='json')}
+        db.rollback();result=workspace_drafts.edit(db,values.kind,values.id,values.version,content)
         resolved=result.get('id',values.id) if isinstance(result,dict) and values.kind=='planning' else values.id
         return {'draft':{'kind':values.kind,'id':resolved},'summary':'已更新同一草案，仍须审核确认。'}
     values=BusinessArgs.model_validate(args);kind='profile' if name=='profile_draft' else 'feedback'
@@ -366,7 +462,7 @@ async def prepare(engine,rid,token,request):
         request['current_drafts']=bounded_drafts(request['current_drafts'][-10:])
         snapshot=revision(db)
         stored=run.payload.get('tool_plan')
-    selection=ai_skills.select_skills(request['message'],request.get('history',[]),request.get('current_drafts',[]))
+    selection=ai_skills.select_skills(request['message'],request.get('history',[]),request.get('current_drafts',[]),mode=request.get('mode'))
     _,audit=ai_skills.compose(selection)
     trace.record('skills.selected',names=audit['names'],hashes=audit['hashes'],expected=selection.expected)
     logger.info('ai_skills %s',json.dumps(audit,sort_keys=True))
@@ -514,7 +610,7 @@ async def prepare(engine,rid,token,request):
                     ref=result['draft'];result['draft']=workspace_drafts.envelope(db,ref['kind'],ref['id'])
                 results.append(jsonable_encoder({'tool':name,**result,'fallback':'trusted_defaults','cause':request.get('planner_failure','INCOMPLETE_PLAN')}))
                 for earlier in results[:-1]:
-                    if earlier.get('error') in ('INVALID_TOOL_ARGUMENTS','AI_RESPONSE_INVALID','AI_UNAVAILABLE'):earlier['recovered_by']='trusted_defaults'
+                    if earlier.get('error') in ('INVALID_TOOL_ARGUMENTS','AI_RESPONSE_INVALID','AI_UNAVAILABLE','AI_RATE_LIMITED'):earlier['recovered_by']='trusted_defaults'
                 request['tool_questions']=[]
                 request['execution_notice']='已使用已知信息与标注的默认值生成可编辑初稿，尚未保存正式修改。请打开最新草案检查；你也可以继续聊天修改。'
             except HTTPException as exc:

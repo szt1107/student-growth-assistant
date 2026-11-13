@@ -24,6 +24,6 @@ export default function ReviewFeedbackDialog({ source, onClose, onOpenTask }) {
           {row.reason && <p>{row.reason}</p>}
           <small>反馈 #{row.id}{row.created_at ? ` · 创建于 ${shanghaiTime(row.created_at).replace('T', ' ')}（北京时间）` : ''}{row.superseded ? ' · 已更正，请刷新回顾数据' : ''}</small>
         </article>)}</div>}
-    <DialogFooter><Button type="button" variant="outline" onClick={onClose}>返回回顾</Button>{onOpenTask && <Button type="button" onClick={() => { onClose(); onOpenTask(source.task_id) }}>在日程中查看任务</Button>}</DialogFooter>
+    <DialogFooter><Button type="button" variant="outline" onClick={onClose}>返回回顾</Button>{onOpenTask && <Button type="button" onClick={() => { onClose(); onOpenTask(source.task_id) }}>查看任务详情</Button>}</DialogFooter>
   </DialogContent></Dialog>
 }

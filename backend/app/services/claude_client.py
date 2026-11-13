@@ -6,6 +6,7 @@ No database or planning access.
 
 import asyncio
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 import json
 import os
 from dataclasses import dataclass, field
@@ -18,6 +19,9 @@ from . import ai_diagnostics as trace
 
 
 TIMEOUT_SECONDS = 120.0
+MAX_RETRIES = 3
+RETRY_DELAYS = (1.0, 2.0, 4.0)
+retry_observer = ContextVar('ai_retry_observer', default=None)
 _shared_client = None
 
 
@@ -53,16 +57,46 @@ async def _transport():
 class AIServiceError(Exception):
     """Only these fixed public messages may reach the API response."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, retryable=False, retry_after=None):
         self.code = code
+        self.retryable = retryable
+        self.retry_after = retry_after
         self.status_code, self.message = {
             "AI_NOT_CONFIGURED": (503, "AI parsing is not configured."),
             "AI_SKILLS_UNAVAILABLE": (503, "Assistant skills could not be loaded safely; no new action was executed."),
             "AI_CONTEXT_TOO_LARGE": (422, "Selected context exceeds the safe request limit; narrow the question or open the workspace."),
             "AI_UNAVAILABLE": (503, "The AI parsing service is temporarily unavailable."),
+            "AI_RATE_LIMITED": (429, "The AI service is currently rate limited. Please retry later."),
             "AI_RESPONSE_INVALID": (502, "The AI parsing service returned an invalid response."),
         }[code]
         super().__init__(self.message)
+
+
+def _network_error(exc):
+    response = getattr(exc, 'response', None)
+    status = response.status_code if response is not None else None
+    retry_after = None
+    if response is not None:
+        try:retry_after = max(0.0, min(15.0, float(response.headers.get('retry-after', ''))))
+        except ValueError:pass
+    return AIServiceError('AI_RATE_LIMITED' if status == 429 else 'AI_UNAVAILABLE',
+        retryable=status in (408, 425, 429, 500, 502, 503, 504) or isinstance(exc,
+            (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ProxyError, TimeoutError)),
+        retry_after=retry_after)
+
+
+async def _wait_for_retry(error, retry):
+    if not error.retryable or retry > MAX_RETRIES:raise error
+    delay = error.retry_after if error.retry_after is not None else RETRY_DELAYS[retry - 1]
+    trace.record('provider.retry',retry=retry,limit=MAX_RETRIES,delay_seconds=delay,code=error.code)
+    observer = retry_observer.get()
+    if observer is not None:observer({'attempt':retry,'limit':MAX_RETRIES,'reason':error.code})
+    await asyncio.sleep(delay)
+
+
+def _clear_retry():
+    observer = retry_observer.get()
+    if observer is not None:observer(False)
 
 
 def _request_timeout():
@@ -182,6 +216,21 @@ def _wire(text, system, config, max_tokens):
 
 
 async def request_claude(text: str, system: str, config: ClaudeConfig, max_tokens: int = 600, *, json_mode: bool = False) -> str:
+    """Retry transient transport failures within the existing total deadline."""
+    try:
+        async with asyncio.timeout(_request_timeout()):
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    return await _request_claude_once(text, system, config, max_tokens, json_mode=json_mode)
+                except AIServiceError as exc:
+                    await _wait_for_retry(exc, attempt + 1)
+    except TimeoutError:
+        raise AIServiceError('AI_UNAVAILABLE') from None
+    finally:
+        _clear_retry()
+
+
+async def _request_claude_once(text, system, config, max_tokens, *, json_mode=False):
     trace.record('provider.request',protocol=config.api_format,stream=False,max_tokens=max_tokens)
     timeout_seconds=_request_timeout()
     try:
@@ -198,14 +247,15 @@ async def request_claude(text: str, system: str, config: ClaudeConfig, max_token
                     endpoint,
                     headers=headers,
                     json=payload,
-                    timeout=timeout_seconds,
+                    timeout=httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 10.0)),
                 )
                 response.raise_for_status()
                 trace.record('provider.http',status=response.status_code,stream=False)
     except (httpx.HTTPError, httpx.InvalidURL, TimeoutError, ValueError) as exc:
-        trace.record('provider.network_failed',status=getattr(getattr(exc,'response',None),'status_code',None),error_type=type(exc).__name__)
+        status = getattr(getattr(exc,'response',None),'status_code',None)
+        trace.record('provider.network_failed',status=status,error_type=type(exc).__name__)
         # Do not expose provider errors, headers, request text, or secrets.
-        raise AIServiceError("AI_UNAVAILABLE") from None
+        raise _network_error(exc) from None
     try:
         body = response.json()
     except (ValueError, RecursionError) as exc:
@@ -237,6 +287,26 @@ async def _sse_frames(response):
 
 
 async def stream_claude(text: str, system: str, config: ClaudeConfig, max_tokens: int = 2000):
+    """Retry before answer text is received, preserving partial output on failure."""
+    received = False
+    try:
+        async with asyncio.timeout(_request_timeout()):
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    async for event in _stream_claude_once(text, system, config, max_tokens):
+                        if event['type'] == 'delta' and event.get('text'):received = True
+                        yield event
+                    return
+                except AIServiceError as exc:
+                    if received:raise
+                    await _wait_for_retry(exc, attempt + 1)
+    except TimeoutError:
+        raise AIServiceError('AI_UNAVAILABLE') from None
+    finally:
+        _clear_retry()
+
+
+async def _stream_claude_once(text, system, config, max_tokens):
     """Only final-answer deltas leave the transport; reasoning never reaches UI.
 
     A rejecting gateway is retried once without stream. A broken established
@@ -251,7 +321,7 @@ async def stream_claude(text: str, system: str, config: ClaudeConfig, max_tokens
         fallback = False
         async with asyncio.timeout(timeout):
             async with _transport() as client:
-                async with client.stream('POST', endpoint, headers=headers, json=payload, timeout=timeout) as response:
+                async with client.stream('POST', endpoint, headers=headers, json=payload, timeout=httpx.Timeout(timeout, connect=min(timeout, 10.0))) as response:
                     trace.record('provider.http',status=response.status_code,stream=True)
                     if response.status_code in (400, 404, 405, 415, 422, 501):
                         fallback = True
@@ -289,7 +359,9 @@ async def stream_claude(text: str, system: str, config: ClaudeConfig, max_tokens
                                 part = choice.get('delta', {}).get('content') or ''
                             else:
                                 if event.get('type') == 'error':
-                                    raise AIServiceError('AI_UNAVAILABLE')
+                                    kind = (event.get('error') or {}).get('type')
+                                    raise AIServiceError('AI_RATE_LIMITED' if kind == 'rate_limit_error' else 'AI_UNAVAILABLE',
+                                        retryable=kind in ('rate_limit_error','overloaded_error','api_error'))
                                 if event.get('type') == 'content_block_delta' and event.get('delta', {}).get('type') == 'text_delta':
                                     part = event['delta'].get('text', '')
                                 if event.get('type') == 'message_delta':
@@ -309,16 +381,17 @@ async def stream_claude(text: str, system: str, config: ClaudeConfig, max_tokens
                         trace.record('provider.stream_end',terminal_seen=ended,normal_finish=valid_finish,complete=complete,
                             output_characters=output,finish_reason=reason if reason in ('stop','length','tool_calls','content_filter','end_turn','stop_sequence','max_tokens',None) else 'unknown')
                         if not complete:
-                            raise AIServiceError('AI_RESPONSE_INVALID')
+                            raise AIServiceError('AI_RESPONSE_INVALID', retryable=not output and reason is None)
         if fallback:
             yield {'type': 'mode', 'value': 'full'}
-            answer = await request_claude(text, system, config, max_tokens)
+            answer = await _request_claude_once(text, system, config, max_tokens)
             yield {'type': 'delta', 'text': answer}
     except AIServiceError:
         raise
     except (httpx.HTTPError, httpx.InvalidURL, TimeoutError) as exc:
-        trace.record('provider.stream_network_failed',status=getattr(getattr(exc,'response',None),'status_code',None),error_type=type(exc).__name__)
-        raise AIServiceError('AI_UNAVAILABLE') from None
+        status = getattr(getattr(exc,'response',None),'status_code',None)
+        trace.record('provider.stream_network_failed',status=status,error_type=type(exc).__name__)
+        raise _network_error(exc) from None
     except (ValueError, TypeError, KeyError, IndexError, RecursionError,AttributeError) as exc:
         trace.record('provider.stream_parse_failed',error_type=type(exc).__name__)
         raise AIServiceError('AI_RESPONSE_INVALID') from None

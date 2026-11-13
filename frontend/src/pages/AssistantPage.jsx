@@ -42,7 +42,7 @@ export function Calendar({data,offset=0,selectedDate,formalOnly=false}){
   </dialog></>
 }
 
-export default function AssistantPage({active, requestedAction, onActionHandled,onManagePreferences,refreshVersion=0,onPlanConfirmed,onFocusChat,observeChat=true,recoveryWorkspace,initialSettings,enabled=true}){
+export default function AssistantPage({active, requestedAction, onActionHandled,onManagePreferences,onOpenDraft,onDraftPreview,refreshVersion=0,onPlanConfirmed,onFocusChat,observeChat=true,recoveryWorkspace,initialSettings,enabled=true}){
   const [data,setData]=useState(null),[text,setText]=useState(''),[pending,setPending]=useState(false),[error,setError]=useState(''),[manual,setManual]=useState(false),[explanation,setExplanation]=useState(null),[runState,setRunState]=useState(null)
   const [form,setForm]=useState({target:'',title:'',minutes:'60',deadline:'',priority:'normal',task_type:'other'})
   const requestId=useRef(null),manualRequest=useRef(null),watchedRun=useRef(null)
@@ -50,6 +50,12 @@ export default function AssistantPage({active, requestedAction, onActionHandled,
   const observing=useRef(observeChat), initialization=useRef(null)
   observing.current=observeChat
   const workspace=recoveryWorkspace||data?.settings?.workspace_id
+  const previewId=data?.proposal?.id
+  useEffect(()=>{
+    const proposal=data?.proposal
+    if(active&&proposal)onDraftPreview?.({...proposal,kind:'planning',content:{actions:proposal.actions||[]},task_details:proposal.tasks||[]},{kind:'planning',id:previewId})
+  },[active,data?.proposal,onDraftPreview,previewId])
+  useEffect(()=>()=>{if(previewId)onDraftPreview?.(null,{kind:'planning',id:previewId})},[active,onDraftPreview,previewId])
   const chatRecovery=useEditRecovery({workspace,resource:`planning:${data?.id}:input`,base:data?'planning-input':undefined,
     value:{text,requestId:requestId.current},dirty:Boolean(text),automatic:true,restore:value=>{setText(typeof value.text==='string'?value.text:'');requestId.current=value.requestId||null}})
   const manualBase=data?JSON.stringify({tasks:data.tasks,proposal:data.proposal}):undefined
@@ -92,7 +98,7 @@ export default function AssistantPage({active, requestedAction, onActionHandled,
   async function cancelRun(){if(!runState?.id)return;try{const stopped=await cancelAssistantRun(runState.id);setRunState(stopped);await load(data.id)}catch(e){setError(e.message)}}
   async function retryRun(){if(!runState?.id)return;setPending(true);setError('');try{const retried=await retryAssistantRun(runState.id);setRunState(retried);await pollRun(retried.id)}catch(e){setError(e.message)}finally{setPending(false)}}
   function changeForm(v){manualRequest.current=null;setForm(v)}
-  function edit(t){manualRequest.current=null;setForm({target:t?.ref||'',title:t?.title||'',minutes:String(t?.duration_minutes||60),deadline:t?.deadline?shanghaiTime(t.deadline):`${data.settings.now.slice(0,10)}T20:00`,priority:t?.priority||'normal',task_type:t?.task_type||'other',splittable:t?.profile?.splittable||false,min_block_minutes:t?.profile?.min_block_minutes||30,max_segments:t?.profile?.max_segments||4});setManual(true);onFocusChat?.()}
+  function edit(t){if(t&&onOpenDraft&&p?.actions.some(action=>action.target===t.ref)){onOpenDraft(p.id,data.id);return}manualRequest.current=null;setForm({target:t?.ref||'',title:t?.title||'',minutes:String(t?.duration_minutes||60),deadline:t?.deadline?shanghaiTime(t.deadline):`${data.settings.now.slice(0,10)}T20:00`,priority:t?.priority||'normal',task_type:t?.task_type||'other',splittable:t?.profile?.splittable||false,min_block_minutes:t?.profile?.min_block_minutes||30,max_segments:t?.profile?.max_segments||4});setManual(true);onFocusChat?.()}
   async function manualSubmit(e){
     e.preventDefault()
     const action=manualAction(form)

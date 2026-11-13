@@ -119,7 +119,6 @@ export default function TimeRulesPage({ onDataChanged }) {
   return (
     <section aria-labelledby="rules-heading">
       <div className="section-heading"><div><p className="eyebrow">我的固定安排</p><h2 id="rules-heading">课程与保护时间</h2></div></div>
-      <p className="helper">日期和时间均按北京时间填写；已停用的规则仍保留在列表中。</p>
       {actionError && <Alert variant="destructive" role="alert">{actionError}</Alert>}
       {loading ? <p className="state-box" role="status">正在加载时间规则…</p> : loadError ? (
         <div className="error-box" role="alert">无法加载时间规则。 {loadError} <Button className="button subtle" onClick={load} type="button">重试</Button></div>

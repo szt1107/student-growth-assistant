@@ -17,12 +17,10 @@ const deadline = '2026-10-25T12:00:00Z'
 const content = { parent: { title: '课程项目', description: null, deadline }, children: [{ title: '需求分析', description: null, duration_minutes: 60, deadline, sort_order: 0 }, { title: '实现', description: null, duration_minutes: 120, deadline, sort_order: 1 }] }
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props))
 
-test('schedule preview distinguishes defaults, user work time, unset deadline and real conflicts',()=>{
-  const html=render(PreviewDetails,{draft:{content:{schedule:{day:'2026-10-14',start_time:'19:00',duration_minutes:90,deadline:null,segments:2,break_minutes:10}},
+test('planning drafts omit the removed preview and explanatory notices',()=>{
+  const html=render(PreviewDetails,{draft:{kind:'planning',content:{schedule:{day:'2026-10-14',start_time:'19:00',duration_minutes:90,deadline:null,segments:2,break_minutes:10}},
     field_sources:{start_time:'system_default',duration_minutes:'user_explicit'},unresolved:['请补充真实截止时间'],notices:['课程冲突未排入']}})
-  assert.match(html,/19:00/);assert.match(html,/系统默认，可修改/);assert.match(html,/90分钟（你提供）/)
-  assert.match(html,/硬截止时间：未设置/);assert.match(html,/休息10分钟，不计入工作时长/)
-  assert.match(html,/请补充真实截止时间/);assert.match(html,/课程冲突未排入/)
+  assert.equal(html,'')
 })
 
 test('partial breakdown edit retains NULL deadlines instead of inventing a date',()=>{

@@ -534,7 +534,7 @@ def test_breakdown_messages_transport_and_failure_isolation(client, monkeypatch,
     transport = httpx.MockTransport(handler)
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs: original_client(transport=transport, **kwargs))
     response = client.post(BASE, json=request)
-    assert len(calls) == 1  # A failed gateway request must never trigger an automatic retry.
+    assert len(calls) == (4 if case in ('http_500', 'timeout') else 1)
     after = client.get('/api/data/export').json()['tables']
     if case in ('json', 'fenced'):
         assert response.status_code == 201, response.text

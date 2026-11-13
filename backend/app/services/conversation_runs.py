@@ -17,7 +17,13 @@ from .assistant_clock import assistant_now
 from .conversations import require_conversation, error, automatic_title
 from .planning_state import planning_transaction
 
-SYSTEM = '当前为回答阶段：自然回应用户，只解释本轮真实tool_results和必要事实。可操作入口由程序提供，不输出内部ID、工具JSON或隐藏推理。'
+SYSTEM = '''当前为回答阶段，只围绕用户这次要做的事回应，用简洁自然的中文。
+日程结果先说明真实冲突或调整原因，再说任务、具体日期（含星期）、实际时段和时长，最后一句请用户查看草案。
+只能根据本轮tool_results说明结果。有真实候选时才说已生成草案，有正式确认收据才说已保存。
+没有可行安排时，说明哪项课程、已有安排或截止时间挡住了用户要求，并给出可执行的调整方式。
+不把无关任务的过期、剩余时长、复盘演示记录或整个任务库的通知贴进回复。
+不用分析报告、技术回执、内部ID、工具JSON、DDL缩写或隐藏推理，不重复草案表单和确认机制。
+工具结果缺少必要事实时明确说明，不编造课程占用、冲突或成功结果。'''
 _tasks = {}
 
 
@@ -38,6 +44,7 @@ def run_data(db, run, after=0, attempt=None):
         error_code=run.error_code, attempt=current, reset=reset, from_cursor=cursor,
         next_cursor=len(output.text), delta=output.text[cursor:],
         delivery=run.payload.get('delivery', 'connecting'),
+        retry=run.payload.get('provider_retry'),
         user_message_id=run.payload['user_message_id'], assistant_message_id=output.id,
         content=output.content, created_at=run.created_at)
 
@@ -86,14 +93,14 @@ def context_for(db,run):
 
 async def reply_events(request):
     from .ai_skills import select_skills,compose
-    system,_=compose(select_skills(request['message'],request.get('history',[]),request.get('current_drafts',[])),SYSTEM)
+    system,_=compose(select_skills(request['message'],request.get('history',[]),request.get('current_drafts',[]),mode=request.get('mode')),SYSTEM)
     from ..codex.composer_modes import with_mode
     system = with_mode(system, request.get('mode'))
     async for event in claude_client.stream_claude(json.dumps(request, ensure_ascii=False, separators=(',', ':')), system, claude_client.get_claude_config()):
         yield event
 
 
-def update_output(engine, run_id, token, *, text='', mode=None, terminal=None, failure=None, links=None):
+def update_output(engine, run_id, token, *, text='', mode=None, terminal=None, failure=None, links=None, retry=None):
     with Session(engine) as db, planning_transaction(db):
         run = db.get(AssistantRun, run_id)
         if not run or run.status != 'running' or run.payload.get('token') != token:
@@ -102,9 +109,18 @@ def update_output(engine, run_id, token, *, text='', mode=None, terminal=None, f
         if len(output.text) + len(text) > 16000 and terminal != 'failed':
             raise claude_client.AIServiceError('AI_RESPONSE_INVALID')
         output.text += text[:max(0, 16000 - len(output.text))]
+        if retry is not None:
+            if retry:
+                previous = run.payload.get('retry_phase', 'understanding') if run.phase == 'retrying' else run.phase
+                run.payload = {**run.payload, 'provider_retry':retry, 'retry_phase':previous}
+                run.phase = 'retrying'
+            else:
+                if run.phase == 'retrying':run.phase = run.payload.get('retry_phase', 'understanding')
+                run.payload = {**run.payload, 'provider_retry':None}
         if mode:
             run.payload = {**run.payload, 'delivery': mode}
-        run.phase = 'generating'
+        if text or mode:
+            run.phase = 'generating'
         if terminal:
             run.status = terminal; run.phase = 'finished'; run.error_code = failure
         output.content = {**output.content, 'status': run.status, **({'links': links} if links is not None else {})}
@@ -114,6 +130,7 @@ def update_output(engine, run_id, token, *, text='', mode=None, terminal=None, f
 async def process(engine, run_id, token):
     buffer = ''
     trace_token=None;stage='context'
+    retry_token = claude_client.retry_observer.set(lambda state: update_output(engine, run_id, token, retry=state))
     try:
         with Session(engine) as db:
             run = db.get(AssistantRun, run_id)
@@ -168,6 +185,7 @@ async def process(engine, run_id, token):
         trace.record('run.failed',phase=stage,code=code,error_type=type(cause).__name__)
         update_output(engine, run_id, token, text=buffer[:16000], terminal='failed', failure=code)
     finally:
+        claude_client.retry_observer.reset(retry_token)
         if trace_token is not None:
             try:
                 with Session(engine) as db,planning_transaction(db):
@@ -233,7 +251,7 @@ def retry(db, conversation_id, run_id, attempt):
             content={'run_id': run.id, 'attempt': attempt + 1, 'status': 'running', 'links': []})
         db.add(output); db.flush()
         run.payload = {**run.payload, 'attempt': attempt + 1, 'retry_of': attempt,
-            'assistant_message_id': output.id, 'token': uuid4().hex, 'delivery': 'connecting'}
+            'assistant_message_id': output.id, 'token': uuid4().hex, 'delivery': 'connecting', 'provider_retry':None}
         run.status = 'running'; run.phase = 'understanding'; run.error_code = None
         return run_data(db, run), True
 

@@ -47,6 +47,7 @@ def no_live_ai(monkeypatch):
     from app.services import assistant_ai, claude_client, constraint_parser, plan_explanation
 
     monkeypatch.setattr(claude_client, "load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setattr(claude_client, "RETRY_DELAYS", (0.0, 0.0, 0.0))
     for name in ("CLAUDE_API_KEY", "CLAUDE_MODEL", "CLAUDE_BASE_URL", "CLAUDE_API_VERSION", "AI_API_FORMAT", "AI_THINKING_EFFORT", "AI_TIMEOUT_SECONDS", "OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("SGA_AUTO_BACKUP", "0")

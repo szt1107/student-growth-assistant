@@ -55,7 +55,7 @@ def context_for(db,run):
         if len(history)>=12 or budget<=0:break
     history.reverse();links=[];now=assistant_now();facts={'now':now.isoformat()}
     from .ai_skills import select_skills
-    selection=select_skills(run.text,history)
+    selection=select_skills(run.text,history,mode=mode)
     signals={**signals,'planning':signals['planning'] or selection.expected in ('planning','breakdown'),
         'profile':signals['profile'] or selection.expected=='profile',
         'review':signals['review'] or selection.expected in ('feedback','review_record')}
@@ -88,7 +88,6 @@ def context_for(db,run):
             links.append({'page':'profile','kind':'profile','label':'查看正式目标与偏好'})
         if signals['planning']:
             links.append({'page':'schedule','kind':'schedule','label':'查看正式日程与任务'})
-            links.extend({'page':'schedule','kind':'task','id':t.id,'label':t.title} for t in tasks[:3])
         if signals['review']:links.append({'page':'review','kind':'review','label':'查看回顾事实'})
     memories=memory_context(db,run.text,signals)
     links.extend({'page':'profile','kind':'memory','id':m['id'],'label':'查看记忆依据'} for m in memories)

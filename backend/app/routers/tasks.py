@@ -46,6 +46,9 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
             raise HTTPException(status_code=404, detail="Task not found")
 
         changes = payload.model_dump(exclude_unset=True)
+        expected = changes.pop('expected_updated_at', None)
+        if expected is not None and expected != task.updated_at:
+            raise HTTPException(status_code=409, detail={'code':'TASK_STALE', 'message':'任务已变化，请刷新信息并重新核对后保存。'})
         validate_task_change(db, changes, task)
         previous_status = task.status
         ensure_task_context(db, task)

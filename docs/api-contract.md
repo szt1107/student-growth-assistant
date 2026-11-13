@@ -30,7 +30,7 @@
 
 ## 当前规划工作台与旧接口
 
-前端请求统一经 `frontend/src/api.js`。现行三页为规划、复盘和我的档案；旧 WeeklyPlan 页面已移除，保留单周接口及 wrapper 供兼容使用。日期计算、网格与禁止过去时间均由后端负责，前端不能自行声明候选合法。
+前端请求统一经 `frontend/src/api.js`。现行入口为首页聊天、日程、复盘和我的档案，单周接口及 wrapper 继续供兼容调用。日期计算、网格与当前时间校验由后端负责。
 
 | 方法与路径 | 当前行为 |
 |---|---|
@@ -82,6 +82,16 @@ diagnostics 保留 code/message 并按事实附加 ref/task_id、constraint、or
 阶段4保留原错误代码；SEARCH_LIMIT增加budget_kind=time或expansions、实际检查时expansions数与phase=search，中文message区分时间和扩展次数上限。仍返回空items，不能作为部分可确认方案。单策略20秒、50,000扩展、64状态不变；无法找到时段、局部范围限制、启发式未找到和预算耗尽保持不同诊断，不声称数学无解。没有新增HTTP接口或修改成功统计响应。
 
 没有新增数据库结构，历史无范围字段的候选继续走阶段 0 校验；新候选若范围字段损坏、丢失或与已有消息标记不一致则拒绝。备份恢复仍使所有待确认候选失效。
+
+## v2.2 草案编辑与时间要求
+
+`GET/PATCH /api/workspace/drafts/planning/{id}` 读取或编辑日程草案，编辑提交 `expected_version` 和 `content`。单任务初稿使用 `content.schedule`，通用规划使用 `content.actions`。编辑只保存待审核内容，正式采用走 `/confirm`。
+
+单任务初稿的 `time_period` 可取 morning、noon、afternoon、evening 或 null，对应08–12、12–14、14–18、18–22时。建议起点分别为09、12、14、19时，执行日期和截止日期分别解析。普通钟点可避让占用，明确固定钟点使用 `start_exact=true`，已过去的固定时间要求用户重新选择。手动修改具体起止时间时，前端显式清除旧 `time_period` 并固定所填时间。
+
+`POST /api/workspace/drafts/planning/{id}/split` 接收 `expected_version`、`content` 和 `target`，按真实空档重新分段。单任务使用 `segments`、`break_minutes`、`work_segments`，通用规划使用 `profile.segment_count`、`min_break_minutes` 和 `allowed_windows`。段数为2–8，每段采用5分钟网格，工作分钟合计须等于预计时长，并通过日期、时段、课程、截止和锁定校验。旧初稿需要恢复原时间要求时返回 `requires_recalculation=true`，重新保存后再确认。
+
+`PATCH /api/tasks/{id}` 可传 `expected_updated_at` 校验编辑依据。与最新 `updated_at` 不符时返回 `409 TASK_STALE`，客户端重新读取后核对修改。
 
 ## Phase 1：健康检查
 
@@ -335,7 +345,7 @@ baseline 始终读取 candidate.based_on_plan_id，即使它后来 superseded；
 | stale candidate | 200，仍按保存的历史 snapshot 比较；不授权 Confirm |
 | 缺配置、timeout、HTTP/network failure、非法 provider/text response | 200，完整 diff + explanation=null + explanation_status=unavailable |
 
-explanation 是 1–3000 字符的纯文本，独立于确定性事实。模型仅消费 structured diff；不返回 raw response/usage/headers/model metadata。明确的最优性/因果措辞被保守拒绝，但不能把该检查理解为语义真实性证明。输出不保存数据库，Task、TimeRule、Plan、PlanItem、PlanningState 和 revision 全部不变。没有 Scheduler/Confirm/tool/SQL-from-AI 调用，读事务在等待 provider 前释放。请求仅在用户主动点击 Explain 时发出；Provider 超时上限 120 秒，前端请求期限 125 秒，无自动重试。
+explanation 为1–3000字符的纯文本，模型根据 structured diff 生成说明，读事务在等待 Provider 前释放。请求由用户点击 Explain 发起，Provider 默认总期限120秒，前端期限125秒。共享模型客户端对临时网络故障及408、425、429、500、502、503、504响应最多重试3次，所有尝试共用总期限。流式回复收到正文后出现失败时保留已收到内容，由用户决定重试。
 
 ## 阶段 3：成长统计
 

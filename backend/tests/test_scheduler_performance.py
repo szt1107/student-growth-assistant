@@ -12,7 +12,11 @@ BENCHMARK = runpy.run_path(str(ROOT/"scripts/scheduling_benchmark.py"))
 
 
 @pytest.mark.parametrize("name", BASELINE["cases"])
-def test_candidates_match_recorded_stage3_output(name):
+def test_candidates_match_recorded_stage3_output(name, monkeypatch):
+    # Keep the original fixture intact. Disabling the new soft constraints must
+    # recover the measured ranking and all three strategy candidates exactly.
+    monkeypatch.setenv('SGA_DAILY_LOAD_WEIGHT', '0')
+    monkeypatch.setenv('SGA_REST_WEIGHT', '0')
     result = BENCHMARK["run_case"](name)
     expected = BASELINE["cases"][name]
     assert result["input_sha256"] == expected["input_sha256"]

@@ -7,7 +7,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import ReviewRecord, GrowthChangeDraft, AssistantMessage, utc_now
-from ..workspace_schemas import RecordCreate, RecordEdit, ReviewContent, DraftEdit, DraftAction, ReviewDraftCreate
+from ..workspace_schemas import RecordCreate, RecordEdit, ReviewContent, DraftEdit, DraftSplit, DraftAction, ReviewDraftCreate
 from ..services.workspace_views import calendar_events, review_facts
 from ..services.conversations import local_owner, error, require_conversation
 from ..services.planning_state import planning_transaction
@@ -115,6 +115,15 @@ def draft_confirm(kind:str,id:ResourceId,payload:DraftAction,db:Session=Depends(
     from ..services.workspace_drafts import confirm,envelope
     confirm(db,kind,id,payload.expected_version)
     return envelope(db,kind,id)
+
+
+@router.post('/workspace/drafts/planning/{id}/split')
+def draft_split(id:ResourceId,payload:DraftSplit,db:Session=Depends(get_db)):
+    from ..services.conversation_tools import split_planning_draft
+    try:return split_planning_draft(db,id,payload.expected_version,payload.content,payload.target)
+    except (ValidationError,ValueError,TypeError):
+        db.rollback()
+        error('INVALID_DRAFT','请核对分段数、预计分钟和日期后重新分段。',422)
 
 
 @router.post('/workspace/drafts/{kind}/{id}/discard')

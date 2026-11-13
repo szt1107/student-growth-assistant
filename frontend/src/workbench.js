@@ -122,7 +122,8 @@ export function mergeMessages(previous, incoming) {
 export function visibleChatMessages(messages) {
   return messages.filter((message,index)=>!(message.role==='assistant' && message.content?.status==='failed' && !message.text?.trim()
     && !message.content?.tools?.length
-    && messages.slice(index+1).some(next=>next.role==='assistant' && next.content?.status==='completed' && next.text?.trim())))
+    && messages.slice(index+1).some(next=>next.role==='assistant' && (next.content?.status==='completed' && next.text?.trim()
+      || message.content?.run_id && next.content?.run_id===message.content.run_id))))
 }
 export function toolNotices(results = [], shownQuestions = []) {
   const labels={tasks:'任务',goals:'目标',preferences:'偏好',calendar:'日程',review:'回顾事实',memories:'已确认记忆'}
@@ -135,13 +136,15 @@ export function toolNotices(results = [], shownQuestions = []) {
   if(queried.length)notices.push(`已查询：${[...new Set(queried)].join('、')}。`)
   return [...new Set(notices)]
 }
-export function messageResourceLinks(links=[]){
+export function messageResourceLinks(links=[],tools=[]){
   // Generic navigation already lives above chat. It is not a tool receipt and
   // repeating it on every attempt misleadingly looks like another query.
   const seen=new Set()
   return (Array.isArray(links)?links:[]).filter(link=>{
     if(!link||typeof link.label!=='string'||!['schedule','review','profile'].includes(link.page))return false
     if(!link.id&&['schedule','review','profile'].includes(link.kind))return false
+    if(link.kind==='task'&&link.source!=='tool'&&!(Array.isArray(tools)?tools:[]).some(result=>!result.error&&(result.links?.some(item=>item.page===link.page&&item.kind===link.kind&&item.id===link.id)
+      ||result.tool==='tasks'&&link.kind==='task'&&result.items?.some(item=>item.id===link.id))))return false
     const key=JSON.stringify([link.page,link.kind,link.id]);if(seen.has(key))return false
     seen.add(key);return true
   })

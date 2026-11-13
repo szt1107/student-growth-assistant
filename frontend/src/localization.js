@@ -56,6 +56,7 @@ const CODE_MESSAGES = {
   AI_SKILLS_UNAVAILABLE: '助手技能文件读取或校验失败，已停止操作。请检查服务端技能配置；仍可使用手动功能。',
   AI_CONTEXT_TOO_LARGE: '所选资料超过安全请求上限，请缩小问题范围或到工作区核对；原消息和草案未改变。',
   AI_UNAVAILABLE: 'AI 暂时不可用，仍可手动操作。',
+  AI_RATE_LIMITED: 'AI 服务当前请求受限，请稍后重试。已有草案可继续查看。',
   AI_RESPONSE_INVALID: 'AI 返回的格式有误。可以重试；已有草案请先查看，不必重复生成。',
   STALE_DRAFT: '任务、目标或计划已变化，请取消旧草案并按最新资料重新生成。',
   DRAFT_VERSION_CONFLICT: '草案已被其他页面修改，请重新加载草案后继续。',

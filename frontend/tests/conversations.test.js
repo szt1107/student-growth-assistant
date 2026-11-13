@@ -4,9 +4,14 @@ import assert from 'node:assert/strict'
 import { createConversation, getConversations, getConversation, getConversationMessages, saveConversationMessage, updateConversation, deleteConversation } from '../src/api.js'
 import { editKey, readEdit, writeEdit, compatibleEdit, mergeMessages, applyReply, requestGate, restoredWorkbench, initialWorkbench, visibleChatMessages, toolNotices,messageResourceLinks } from '../src/workbench.js'
 
-test('generic chat navigation has one header entry while genuine resource links remain visible',()=>{
+test('chat links require an actual tool result and omit unsolicited recent tasks',()=>{
   const task={page:'schedule',kind:'task',id:7,label:'真实任务'}
-  assert.deepEqual(messageResourceLinks([{page:'schedule',kind:'schedule',label:'查看正式日程与任务'},task,task]),[task])
+  assert.deepEqual(messageResourceLinks([{page:'schedule',kind:'schedule',label:'查看正式日程与任务'},task,task]),[])
+  assert.deepEqual(messageResourceLinks([task,task],[{tool:'tasks',items:[{id:7}]}]),[task])
+  assert.deepEqual(messageResourceLinks([task],[{tool:'tasks',items:[{id:8}]}]),[])
+  assert.deepEqual(messageResourceLinks([{...task,source:'tool'}]),[{...task,source:'tool'}])
+  const memory={page:'profile',kind:'memory',id:3,label:'查看记忆依据'}
+  assert.deepEqual(messageResourceLinks([memory]),[memory])
   assert.deepEqual(messageResourceLinks(null),[])
   assert.deepEqual(toolNotices([{tool:'tasks'}]),['已查询：任务。'])
 })

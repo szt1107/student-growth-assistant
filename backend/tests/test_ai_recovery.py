@@ -105,7 +105,7 @@ def test_real_protocol_failure_or_query_loop_still_persists_editable_draft(clien
     defaults=next(e for e in trace['events'] if e['stage']=='planning_draft.persisted')
     assert defaults['draft_id']==draft['id'] and defaults['duration_minutes']==90 and not defaults['hard_deadline_present']
     if mode=='truncated':assert any(e.get('finish_reason')=='length' for e in trace['events'])
-    if mode=='timeout':assert len(wire['requests'])==1 and 'provider.network_failed' in stages
+    if mode=='timeout':assert len(wire['requests'])==4 and 'provider.network_failed' in stages
     if mode=='schema':
         errors=next(e['errors'] for e in trace['events'] if e['stage']=='tool_plan.schema_failed')
         assert errors[0]['path']==['calls',0,'arguments']
@@ -182,7 +182,7 @@ def test_compound_followup_edits_same_draft_and_uses_real_receipt(client,wire):
     changed=next(r['draft'] for r in result['content']['tools'] if r.get('draft'))
     assert result['status']=='completed' and changed['id']==draft['id'] and changed['version']!=draft['version']
     assert changed['content']['schedule']['start_time']=='20:00' and changed['content']['schedule']['deadline'].endswith('22:00:00+08:00')
-    assert '20:00' in result['delta'] and '90' in result['delta'] and '尚未' in result['delta']
+    assert '20:00' in result['delta'] and '90' in result['delta'] and '确认后才会保存' in result['delta']
     assert not any(r.get('stream') for r in wire['requests']), 'Business outcomes must come from saved results, not free narration'
     assert call(client,'/api/tasks')==[]
     saved=call(client,f"/api/workspace/drafts/planning/{changed['id']}/confirm",{'expected_version':changed['version']})

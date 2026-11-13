@@ -27,11 +27,17 @@ def check(db,row,expected):
 
 def envelope(db,kind,id):
     row=require(db,kind,id);status=row.status
+    problems=[];task_details=[];task_categories=[];schedule_adjustments=[]
     if kind=='planning':
         session=db.get(AssistantSession,row.session_id)
         if session.latest_proposal_id!=row.id and status not in ('applied','discarded'):status='superseded'
-        content={'schedule':row.payload['preview_input']} if row.payload.get('preview_input') else {'actions':row.payload.get('actions',[]),'strategy':row.payload.get('requested_strategy') or 'balanced'}
+        from .schedule_preview import editable_schedule
+        content={'schedule':editable_schedule(db,row)} if row.payload.get('preview_input') else {'actions':row.payload.get('actions',[]),'strategy':row.payload.get('requested_strategy') or 'balanced'}
         summary=row.payload.get('summary',''); links=row.payload.get('items',[])
+        targets={action.get('target') for action in row.payload.get('actions',[])} or set(row.payload.get('selected_refs',[]))
+        task_details=[task for task in row.payload.get('tasks',[]) if task['ref'] in targets]
+        from .taxonomy import categories_payload
+        task_categories=categories_payload(db)
     elif kind=='breakdown':
         content=row.payload['content'];summary=content['parent']['title'];links=[]
         from .task_breakdown import _response
@@ -44,12 +50,25 @@ def envelope(db,kind,id):
     unresolved=row.payload.get('unresolved',[])
     if kind=='breakdown' and (not content['parent'].get('deadline') or any(not child.get('deadline') for child in content['children'])):
         unresolved=['正式创建前请填写父子任务的真实截止时间；当前为可编辑初稿。']
+    if kind=='planning':
+        from .schedule_preview import problems as planning_problems, adjustments
+        problems=planning_problems(db,row,status)
+        schedule_adjustments=adjustments(db,row,status)
+    requires_recalculation=kind=='planning' and bool(row.payload.get('preview_input')) and content['schedule']!=row.payload['preview_input']
+    if requires_recalculation:
+        links=[];schedule_adjustments=[]
+        if status=='ready':status='needs_input'
+        problems.append(dict(code='RECALCULATION_REQUIRED',message='这份旧草案需要按原来的时间要求重新计算。',
+            suggestion='请点击“保存草案编辑”，核对更新后的安排，再确认采用。'))
     return dict(kind=kind,id=id,version=version(row),status=status,source_revision=row.source_revision,
         content=content,summary=summary,session_id=row.session_id,items=links,
+        task_details=task_details,task_categories=task_categories,
         schedule_target=row.payload['actions'][0]['target'] if kind=='planning' and row.payload.get('preview_input') and row.payload.get('actions') else None,
         replacement_id=session.latest_proposal_id if kind=='planning' and status=='superseded' else None,
         field_sources=row.payload.get('field_sources',{}),unresolved=unresolved,
-        notices=row.payload.get('notices',[]),diagnostics=row.payload.get('diagnostics',[]),
+        schedule_adjustments=schedule_adjustments,
+        requires_recalculation=requires_recalculation,
+        notices=row.payload.get('notices',[]),diagnostics=row.payload.get('diagnostics',[]),problems=problems,
         preview_only=bool(row.payload.get('unresolved')),facts=row.payload.get('facts'),sources=row.payload.get('sources',{}),receipt=row.payload.get('receipt') or row.payload.get('created_task_ids') or
             ({'plan_id':row.plan_id} if kind=='planning' and row.status=='applied' and row.plan_id is not None else None))
 
@@ -144,7 +163,12 @@ def confirm(db,kind,id,expected):
         row=require(db,kind,id)
         if row.status!='applied':
             check(db,row,expected)
-            if row.payload.get('unresolved'):error('DRAFT_FIELDS_REQUIRED','请先补充真实截止时间及任务名称；初稿尚不能正式保存。',422)
+            if row.status!='ready' or row.payload.get('unresolved'):
+                from .schedule_preview import problems as planning_problems
+                details=planning_problems(db,row,row.status)
+                message='\n'.join(p['message']+' '+p['suggestion'] for p in details)
+                if row.payload.get('unresolved'):error('DRAFT_FIELDS_REQUIRED',message or '请填写任务名称和最晚完成时间，再保存草案。',422)
+                error('PROPOSAL_NOT_READY',message or '请调整任务时间并保存草案，检查通过后再确认采用。')
         db.rollback()
         return assistant.confirm(id,db,expected)
     row=require(db,kind,id)

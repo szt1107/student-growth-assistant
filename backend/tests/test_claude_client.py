@@ -113,7 +113,7 @@ def test_stream_200_json_is_full_mode_without_a_second_request(monkeypatch):
 
 
 @pytest.mark.parametrize('status',[401,429,500])
-def test_stream_errors_never_expose_secrets_or_automatically_repeat(monkeypatch,status):
+def test_stream_errors_retry_only_transient_failures_and_keep_secrets_private(monkeypatch,status):
     calls=[]
     def handler(request):
         calls.append(request)
@@ -121,8 +121,8 @@ def test_stream_errors_never_expose_secrets_or_automatically_repeat(monkeypatch,
     mock_http(monkeypatch,handler)
     async def collect():return [event async for event in claude_client.stream_claude('text','system',CONFIG)]
     with pytest.raises(AIServiceError) as captured:asyncio.run(collect())
-    assert captured.value.code=='AI_UNAVAILABLE'
-    assert 'private-placeholder' not in str(captured.value) and len(calls)==1
+    assert captured.value.code==('AI_RATE_LIMITED' if status==429 else 'AI_UNAVAILABLE')
+    assert 'private-placeholder' not in str(captured.value) and len(calls)==(1 if status==401 else 4)
 
 
 def test_deepseek_official_defaults_to_low_thinking_with_room_for_final_json(monkeypatch):
@@ -286,8 +286,8 @@ def test_provider_http_errors_never_expose_provider_secret(monkeypatch, status):
     mock_http(monkeypatch, lambda request: httpx.Response(status, text=CONFIG.api_key))
     with pytest.raises(AIServiceError) as captured:
         call()
-    assert captured.value.code == "AI_UNAVAILABLE"
-    assert captured.value.status_code == 503
+    assert captured.value.code == ('AI_RATE_LIMITED' if status == 429 else 'AI_UNAVAILABLE')
+    assert captured.value.status_code == (429 if status == 429 else 503)
     assert CONFIG.api_key not in str(captured.value)
     assert "gateway.example" not in str(captured.value)
 
