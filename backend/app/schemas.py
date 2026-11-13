@@ -57,6 +57,7 @@ class TaskUpdate(BaseModel):
     parent_task_id: Annotated[int, Field(strict=True, gt=0)] | None = None
     task_kind: Literal["executable", "container"] | None = None
     sort_order: Annotated[int, Field(strict=True, ge=0, le=10000)] | None = None
+    expected_updated_at: AwareDatetime | None = None
 
     @field_validator("title")
     @classmethod

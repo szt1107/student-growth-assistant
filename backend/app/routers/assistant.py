@@ -23,6 +23,7 @@ from ..services.planning_window import expand_window_rules
 from ..services.claude_client import AIServiceError
 from ..schemas import GrowthDirectionUpdate, GrowthGoalCreate, GrowthGoalPatch, TaskFeedbackCreate
 from ..services.taxonomy import categories_payload, create_category, rule_payload, rules_from_legacy, rules_payload, update_category, validate_rule
+from ..services.conversations import ensure_available, local_owner
 
 router=APIRouter(prefix='/api/assistant',tags=['Assistant'])
 _run_tasks={}
@@ -36,6 +37,10 @@ def fail(code,message,status=409):
 def require(db,model,id):
     value=db.get(model,id)
     if value is None: fail('NOT_FOUND','记录不存在。',404)
+    if model is AssistantSession:
+        ensure_available(db,value,write=True)
+    elif model in (AssistantProposal,AssistantRun,GrowthChangeDraft):
+        ensure_available(db,db.get(AssistantSession,value.session_id),write=True)
     return value
 
 
@@ -55,10 +60,17 @@ def _active_candidate(db,s):
     return None
 
 
-def _previous_candidate(db,s):
+def _previous_candidate(db,s,locked_refs=()):
     previous=_active_candidate(db,s)
     if previous:
-        return previous.payload['items']+previous.payload.get('retained',[])
+        # A preview whose clock has reached its proposed start has not begun
+        # execution. Only formal segments can be historical or started.
+        # Keep the guarded previous snapshot (including its formal history) for
+        # confirmation checks. An explicit user lock on a candidate still holds.
+        _,formal=baseline(db,s.week_start)
+        refs={x['ref'] for x in formal};now=assistant_clock.assistant_now()
+        locked=set(locked_refs)|{t['ref'] for t in previous.payload.get('tasks',[]) if (t.get('profile') or {}).get('locked')}
+        return [x for x in previous.payload['items']+previous.payload.get('retained',[]) if x['ref'] in refs or x['ref'] in locked or dt(x['start_at'])>now]
     return None
 
 
@@ -81,7 +93,8 @@ def current_week():
 
 
 def require_current(s):
-    if s.week_start!=current_week(): fail('OUTSIDE_CURRENT_WEEK','会话不属于当前周，请新建本周会话。')
+    if s.scope!='planning': fail('INVALID_DRAFT','请使用对应会话类型的专用入口。',422)
+    if s.week_start!=current_week(): fail('OUTSIDE_CURRENT_WEEK','会话不属于当前规划周，请新建本周规划会话。')
 
 
 def base_actions(db,s,revision):
@@ -127,7 +140,8 @@ def proposal_payload(db,s,actions,questions=None,ai_error=None,preferences=None,
         temporary_preferences=inherited.get('temporary_preferences')
         allow_replan=allow_replan or bool(preference_updates or temporary_preferences)
     scope=_scope_context(db,s) or {}
-    payload=build_proposal(db,s.week_start,actions,questions,preferences=preferences,preference_updates=preference_updates,allow_replan=allow_replan or expand_scope,temporary_preferences=temporary_preferences,previous_override=_previous_candidate(db,s),expanded=expand_scope or scope.get('mode')=='expanded',expansion_from=s.latest_proposal_id if expand_scope else scope.get('expansion_from'))
+    locked={a.get('target') for a in actions if (a.get('fields',{}).get('profile') or {}).get('locked')}
+    payload=build_proposal(db,s.week_start,actions,questions,preferences=preferences,preference_updates=preference_updates,allow_replan=allow_replan or expand_scope,temporary_preferences=temporary_preferences,previous_override=_previous_candidate(db,s,locked),expanded=expand_scope or scope.get('mode')=='expanded',expansion_from=s.latest_proposal_id if expand_scope else scope.get('expansion_from'))
     payload['ai_error']=ai_error
     return payload
 
@@ -447,7 +461,8 @@ def open_workspace_session(payload:WorkspaceOpenRequest,db:Session=Depends(get_d
     week=date(1970,1,5) if payload.scope=='profile' else (payload.week_start or current_week())
     if week.weekday()!=0: fail('INVALID_WEEK','复盘周必须从周一开始。',422)
     if payload.scope=='planning' and week!=current_week(): fail('OUTSIDE_CURRENT_WEEK','规划只支持当前周。',422)
-    existing=db.scalar(select(AssistantSession).where(AssistantSession.scope==payload.scope,AssistantSession.week_start==week).order_by(AssistantSession.id.desc()))
+    existing=db.scalar(select(AssistantSession).where(AssistantSession.scope==payload.scope,AssistantSession.week_start==week,
+        AssistantSession.owner_id==local_owner(db),AssistantSession.archived_at.is_(None),AssistantSession.deleted_at.is_(None)).order_by(AssistantSession.id.desc()))
     if existing:return {'id':existing.id,'scope':existing.scope,'week_start':existing.week_start.isoformat()}
     session=AssistantSession(week_start=week,scope=payload.scope); db.add(session); db.commit(); db.refresh(session)
     return {'id':session.id,'scope':session.scope,'week_start':session.week_start.isoformat()}
@@ -455,6 +470,7 @@ def open_workspace_session(payload:WorkspaceOpenRequest,db:Session=Depends(get_d
 
 @router.post('/sessions/{id}/runs',status_code=202)
 async def create_run(id:int,payload:RunRequest,db:Session=Depends(get_db)):
+    begin_planning_transaction(db)
     s=require(db,AssistantSession,id)
     if s.scope not in ('planning','profile','review'): fail('INVALID_DRAFT','请使用任务拆解专用入口。',422)
     if s.scope=='planning': require_current(s)
@@ -482,6 +498,7 @@ async def create_run(id:int,payload:RunRequest,db:Session=Depends(get_db)):
 @router.get('/runs/{id}')
 def get_run(id:int,db:Session=Depends(get_db)):
     run=require(db,AssistantRun,id)
+    if run.payload.get('kind') in ('conversation','summary'): fail('CONVERSATION_API_REQUIRED','请使用真实会话回复接口。',422)
     if run.status=='running' and _revision(db)!=run.source_revision:
         begin_planning_transaction(db)
         run=require(db,AssistantRun,id)
@@ -495,6 +512,7 @@ def get_run(id:int,db:Session=Depends(get_db)):
 @router.post('/runs/{id}/cancel')
 def cancel_run(id:int,db:Session=Depends(get_db)):
     run=require(db,AssistantRun,id)
+    if run.payload.get('kind') in ('conversation','summary'): fail('CONVERSATION_API_REQUIRED','请使用真实会话回复接口。',422)
     if run.status=='running':
         run.status='cancelled'; run.phase='cancelled'
         proposal_id=run.payload.get('proposal_id')
@@ -509,6 +527,9 @@ def cancel_run(id:int,db:Session=Depends(get_db)):
 @router.post('/runs/{id}/retry',status_code=202)
 async def retry_run(id:int,db:Session=Depends(get_db)):
     run=require(db,AssistantRun,id)
+    if run.payload.get('kind') in ('conversation','summary'): fail('CONVERSATION_API_REQUIRED','请使用真实会话回复接口。',422)
+    session=require(db,AssistantSession,run.session_id)
+    if session.scope=='planning': require_current(session)
     if run.status=='running':return _run_response(run)
     if run.status=='completed' and require(db,AssistantSession,run.session_id).scope!='planning':
         fail('RUN_NOT_RETRYABLE','这条资料或复盘对话已经处理完成。')
@@ -527,6 +548,7 @@ async def retry_run(id:int,db:Session=Depends(get_db)):
 @router.get('/sessions/{id}')
 def get_session(id:int,db:Session=Depends(get_db)):
     s=require(db,AssistantSession,id)
+    if s.scope=='conversation': fail('CONVERSATION_API_REQUIRED','请使用真实会话接口读取此会话。',422)
     if s.scope!='planning':
         messages=[dict(id=m.id,role=m.role,text=m.text,content=m.content) for m in db.scalars(select(AssistantMessage).where(AssistantMessage.session_id==s.id).order_by(AssistantMessage.id)).all()]
         draft=db.scalar(select(GrowthChangeDraft).where(GrowthChangeDraft.session_id==s.id,GrowthChangeDraft.status=='ready').order_by(GrowthChangeDraft.id.desc()))
@@ -593,13 +615,15 @@ async def message(id:int,payload:MessageRequest,db:Session=Depends(get_db)):
 
 
 @router.post('/proposals/{id}/preview')
-def preview(id:int,payload:PreviewRequest,db:Session=Depends(get_db)):
+def preview(id:int,payload:PreviewRequest,db:Session=Depends(get_db),expected_version:str|None=None):
     try:
         begin_planning_transaction(db)
         old=require(db,AssistantProposal,id); s=require(db,AssistantSession,old.session_id); require_current(s)
+        from ..services.workspace_drafts import check
         if payload.client_message_id:
             duplicate=db.scalar(select(AssistantMessage).where(AssistantMessage.session_id==s.id,AssistantMessage.client_message_id==payload.client_message_id))
             if duplicate: return response(require(db,AssistantProposal,duplicate.proposal_id))
+        check(db,old,expected_version)
         if s.latest_proposal_id!=old.id or old.source_revision!=get_or_create_planning_state(db).revision:
             fail('STALE_CANDIDATE','资料或候选已变化，请重新生成；不会覆盖最新任务修改。')
         if old.status in ('applied','discarded','superseded'): fail('PROPOSAL_INACTIVE','请修改最新候选。')
@@ -648,16 +672,23 @@ def discard(id:int,db:Session=Depends(get_db)):
 
 
 @router.post('/proposals/{id}/confirm')
-def confirm(id:int,db:Session=Depends(get_db)):
+def confirm(id:int,db:Session=Depends(get_db),expected_version:str|None=None):
     try:
         begin_planning_transaction(db)
         p=require(db,AssistantProposal,id)
         if p.status=='applied': return response(p)
+        from ..services.workspace_drafts import check
+        check(db,p,expected_version)
+        if p.payload.get('preview_input'):
+            from ..services.schedule_preview import editable_schedule
+            if editable_schedule(db,p)!=p.payload['preview_input']:
+                fail('DRAFT_RECALCULATION_REQUIRED','请先保存草案编辑，核对按原时间要求重新计算的安排，再确认采用。')
         if p.status!='ready': fail('PROPOSAL_NOT_READY','当前方案不可采用。')
         s=require(db,AssistantSession,p.session_id); require_current(s)
         if s.latest_proposal_id!=p.id or p.source_revision!=get_or_create_planning_state(db).revision:
             fail('STALE_CANDIDATE','候选依据的资料已变化，请重新生成。')
-        world=proposed_world(db,s.week_start,p.payload['actions'],_previous_candidate(db,s))
+        world=proposed_world(db,s.week_start,p.payload['actions'],_previous_candidate(db,s),
+            include_unplanned=p.payload.get('include_unplanned',True))
         _verified_scope(db,p)
         try:
             validate_scope(p.payload,world,world_rules(db,world,(p.payload.get('temporary_preferences') or {}).get('blocked_windows',[])))
@@ -739,18 +770,21 @@ def confirm(id:int,db:Session=Depends(get_db)):
 
 
 @router.post('/drafts/{id}/confirm')
-def confirm_growth_draft(id:int,db:Session=Depends(get_db)):
+def confirm_growth_draft(id:int,db:Session=Depends(get_db),expected_version:str|None=None):
     try:
         begin_planning_transaction(db)
         draft=require(db,GrowthChangeDraft,id)
         if draft.scope not in ('profile','review'): fail('INVALID_DRAFT','请使用任务拆解专用确认入口。',422)
         if draft.status=='applied': return {'id':draft.id,'status':'applied'}
+        from ..services.workspace_drafts import check
+        check(db,draft,expected_version)
         if draft.status!='ready' or draft.source_revision!=_revision(db): fail('STALE_DRAFT','资料已变化，请重新生成草案。')
         session=require(db,AssistantSession,draft.session_id)
         if session.scope!=draft.scope: fail('INVALID_DRAFT','草案类型不正确。',422)
         operations=draft.payload['operations']
         if len(operations)>10: fail('INVALID_DRAFT','一次最多确认10项修改。',422)
         category_refs={}
+        chat_receipts=[]
         if draft.scope=='profile':
             for operation in operations:
                 if operation['op']=='create_category':
@@ -760,8 +794,12 @@ def confirm_growth_draft(id:int,db:Session=Depends(get_db)):
                 elif operation['op']=='update_category':
                     fields=operation.get('fields') or {}
                     row=update_category(db,operation['key'],**fields)
-        for operation in operations:
+        for operation_index, operation in enumerate(operations):
             op=operation.get('op')
+            if draft.payload.get('tool_key') and op in ('create_time_rule','update_time_rule','work_timer'):
+                from ..codex.chat_capabilities import apply_operation
+                chat_receipts.append(apply_operation(db,'profile' if draft.scope=='profile' else 'feedback',operation,f'chat-draft-{draft.id}-{operation_index}'))
+                continue
             if draft.scope=='profile' and op in ('create_category','update_category'):
                 continue
             if draft.scope=='profile' and op=='set_direction':
@@ -810,6 +848,9 @@ def confirm_growth_draft(id:int,db:Session=Depends(get_db)):
                 task=require(db,Task,int(operation['task_id']))
                 values={k:v for k,v in operation.items() if k in {'outcome','actual_minutes','remaining_minutes','reason'}}
                 values['client_action_id']=f'chat-draft-{draft.id}'
+                if draft.payload.get('tool_key'):
+                    values={k:v for k,v in operation.items() if k in TaskFeedbackCreate.model_fields and k!='client_action_id'}
+                    values['client_action_id']=f'chat-draft-{draft.id}-{operation_index}'
                 if operation.get('corrects_feedback_id') is not None: values['corrects_feedback_id']=operation['corrects_feedback_id']
                 feedback=TaskFeedbackCreate(**values)
                 from ..services.growth_tracking import record_feedback
@@ -817,6 +858,7 @@ def confirm_growth_draft(id:int,db:Session=Depends(get_db)):
             else: fail('INVALID_DRAFT','草案包含不支持的修改。',422)
         if draft.scope=='profile' and operations:
             db.flush(); record_profile_revision(db)
+        draft.payload={**draft.payload,'receipt':{'saved':True,'operations':chat_receipts}}
         draft.status='applied'; draft.applied_at=utc_now(); bump_revision(db); db.commit()
         return {'id':draft.id,'status':'applied','message':'已保存。可以将这项修改带入规划，另行生成日程候选。'}
     except Exception:

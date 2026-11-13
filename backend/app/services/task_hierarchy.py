@@ -82,7 +82,7 @@ def validate_backup_hierarchy(tables):
         hierarchy_error("CONTAINER_NOT_EXECUTABLE", "备份计划含父容器。")
 
 
-def serialize_tasks(db, tasks, contexts=None, feedbacks=None):
+def serialize_tasks(db, tasks, contexts=None, feedbacks=None, scheduled=None):
     """Explainable counts from real children; never infer completion from the clock."""
     from ..schemas import TaskResponse
     result = [TaskResponse.model_validate(task) for task in tasks]
@@ -91,7 +91,8 @@ def serialize_tasks(db, tasks, contexts=None, feedbacks=None):
         return result
     contexts = contexts if contexts is not None else {c.task_id: c for c in db.scalars(select(TaskGrowthContext)).all()}
     feedbacks = feedbacks if feedbacks is not None else list(db.scalars(select(TaskFeedback).where(TaskFeedback.retracted_at.is_(None)).order_by(TaskFeedback.id)).all())
-    scheduled = set(db.scalars(select(PlanItem.task_id).join(Plan).where(Plan.status == "confirmed", PlanItem.kind == "task")).all())
+    if scheduled is None:
+        scheduled = set(db.scalars(select(PlanItem.task_id).join(Plan).where(Plan.status == "confirmed", PlanItem.kind == "task")).all())
     latest, actual = {}, Counter()
     for row in sorted(feedbacks, key=lambda item: item.id):
         if row.retracted_at is None:

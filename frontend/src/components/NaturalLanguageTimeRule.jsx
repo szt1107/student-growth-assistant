@@ -1,3 +1,5 @@
+import { Alert } from '../codex/ui/controls.js'
+import { Button, Textarea, Label } from '../codex/ui/controls.js'
 import { useEffect, useRef, useState } from 'react'
 import { parseConstraint } from '../api.js'
 import { parsingNotice, proposalDay, proposalToFormRule } from '../timeRules.js'
@@ -68,11 +70,11 @@ export default function NaturalLanguageTimeRule({ onApply, manualPending }) {
       <h3 id="natural-language-heading">自然语言添加</h3>
       <p className="helper">描述一段课程或保留时间，AI 会生成提案，供你检查和修改。</p>
       <form onSubmit={parse}>
-        <label htmlFor="constraint-text">描述你的时间安排</label>
-        <textarea id="constraint-text" rows={3} maxLength={4000} value={text} disabled={parsing || saving}
+        <Label htmlFor="constraint-text">描述你的时间安排</Label>
+        <Textarea id="constraint-text" rows={3} maxLength={4000} value={text} disabled={parsing || saving}
           placeholder="每周三下午 2 点到 4 点是实验课。"
           onChange={(event) => { setText(event.target.value); setResult({ status: 'idle' }); setSaved(false); setApplyError('') }} />
-        <div className="button-row"><button className="button secondary" type="submit" disabled={parsing || saving || !text.trim()}>{parsing ? '正在解析…' : '用 AI 解析'}</button></div>
+        <div className="button-row"><Button className="button secondary" type="submit" disabled={parsing || saving || !text.trim()}>{parsing ? '正在解析…' : '用 AI 解析'}</Button></div>
       </form>
       <div aria-live="polite">
         {parsing && <p role="status">正在解析你的描述…</p>}
@@ -91,7 +93,7 @@ export default function NaturalLanguageTimeRule({ onApply, manualPending }) {
           <div><dt>开始时间</dt><dd>{proposal.start_time}</dd></div>
           <div><dt>结束时间</dt><dd>{proposal.end_time}</dd></div>
         </dl>
-        {applyError && <p className="error-box" role="alert">{applyError}</p>}
+        {applyError && <Alert variant="destructive" role="alert">{applyError}</Alert>}
         <TimeRuleForm key={proposalVersion} kind={proposal.kind} rule={proposal} pending={saving || manualPending}
           onSubmit={apply} onCancel={() => { setResult({ status: 'idle' }); setApplyError('') }}
           submitLabel="应用时间规则" cancelLabel="放弃提案" />

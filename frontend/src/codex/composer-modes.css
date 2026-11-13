@@ -1,0 +1,16 @@
+.composer-modes {--composer-control-size:36px;display:flex;align-items:center;gap:6px;min-width:0;height:var(--composer-control-size)}
+.composer-modes .composer-add {width:36px;height:36px;min-height:36px;border:0;border-radius:50%;padding:8px;color:var(--muted);background:var(--sga-muted);box-shadow:none}
+.composer-modes .composer-add svg {width:20px;height:20px}
+.composer-modes .composer-add:hover:not(:disabled),.composer-modes .composer-add[data-state=open] {background:var(--sga-muted);color:var(--sga-primary)}
+.composer-mode-menu {width:280px;max-width:calc(100vw - 24px);padding:6px;border:1px solid var(--sga-border);border-radius:16px;background:var(--sga-surface);color:var(--sga-foreground);box-shadow:0 6px 24px rgb(36 62 53 / .12)}
+.composer-mode-heading {font-size:12px;line-height:1.5;color:var(--muted);padding:6px 10px 4px}
+.composer-mode-item {display:flex;align-items:center;gap:12px;min-height:44px;padding:10px;border-radius:10px;font-size:14px;line-height:1.5;color:var(--sga-foreground);cursor:pointer}
+.composer-mode-item[data-highlighted] {background:var(--sga-muted);color:var(--sga-primary)}
+.composer-mode-item svg {width:18px;height:18px;flex-shrink:0;color:var(--muted)}
+.composer-mode-item .composer-mode-check {margin-left:auto;width:16px;height:16px;color:var(--sga-primary)}
+.composer-mode-chip {display:flex;align-items:center;gap:8px;box-sizing:border-box;height:var(--composer-control-size);min-height:var(--composer-control-size);padding:0 8px 0 12px;border-radius:999px;background:var(--sga-muted);color:var(--sga-primary);font-size:14px;line-height:1.5;white-space:nowrap}
+.composer-mode-chip>svg {width:18px;height:18px;flex-shrink:0}
+.composer-mode-chip .composer-mode-clear {width:24px;height:24px;min-height:24px;border:0;padding:4px;border-radius:50%;color:inherit}
+.composer-mode-chip .composer-mode-clear svg {width:14px;height:14px}
+.composer-mode-chip .composer-mode-clear:hover {background:var(--sga-selected)}
+@media(max-width:1023px){.composer-modes {--composer-control-size:44px}.composer-modes .composer-add {width:44px;height:44px;min-height:44px}}

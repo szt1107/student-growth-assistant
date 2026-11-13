@@ -9,6 +9,7 @@ from . import assistant_ai, assistant_clock
 from .claude_client import AIServiceError
 from .planning_state import bump_revision, planning_transaction
 from .task_hierarchy import hierarchy_error
+from .conversations import local_owner, ensure_available
 
 SCOPE = "task_breakdown"
 
@@ -26,7 +27,7 @@ def _goal(db, goal_id):
 
 
 def _dates(content, now):
-    if content.parent.deadline <= now or any(child.deadline <= now for child in content.children):
+    if content.parent.deadline and content.parent.deadline <= now or any(child.deadline and child.deadline <= now for child in content.children):
         hierarchy_error("BREAKDOWN_DEADLINE_INVALID", "父子任务截止时间必须在未来，请修改草案。")
 
 
@@ -36,7 +37,7 @@ def _response(db, draft):
     original = BreakdownCreate.model_validate(data["input"])
     status = draft.status
     now = assistant_clock.assistant_now()
-    if status == "ready" and (draft.source_revision != _revision(db) or content.parent.deadline <= now or any(child.deadline <= now for child in content.children)):
+    if status == "ready" and (draft.source_revision != _revision(db) or content.parent.deadline and content.parent.deadline <= now or any(child.deadline and child.deadline <= now for child in content.children)):
         status = "stale"
     total = sum(child.duration_minutes for child in content.children)
     ids = data.get("created_task_ids", [])
@@ -69,8 +70,14 @@ async def create_draft(db, request):
             _dates(content, assistant_clock.assistant_now())
             if content.parent.deadline != request.deadline:
                 raise ValueError("AI changed user deadline")
+            if request.deadline is None and any(child.deadline is not None for child in content.children):
+                raise ValueError('AI invented a child deadline without a user deadline')
+        except AIServiceError:
+            if request.deadline is not None:raise
+            content = BreakdownContent(parent={"title":request.title,"deadline":None},children=[])
         except (ValidationError, ValueError, HTTPException):
-            raise AIServiceError("AI_RESPONSE_INVALID") from None
+            if request.deadline is not None:raise AIServiceError("AI_RESPONSE_INVALID") from None
+            content = BreakdownContent(parent={"title":request.title,"deadline":None},children=[])
     else:
         content = BreakdownContent(parent={"title": request.title, "deadline": request.deadline}, children=[])
     with planning_transaction(db):
@@ -79,7 +86,9 @@ async def create_draft(db, request):
             return _response(db, existing)
         if _revision(db) != source_revision:
             hierarchy_error("STALE_DRAFT", "生成期间资料已变化，请重新生成。", 409)
-        session = db.scalar(select(AssistantSession).where(AssistantSession.scope == SCOPE).order_by(AssistantSession.id.desc()))
+        session = db.scalar(select(AssistantSession).where(AssistantSession.scope == SCOPE,
+            AssistantSession.owner_id == local_owner(db), AssistantSession.archived_at.is_(None),
+            AssistantSession.deleted_at.is_(None)).order_by(AssistantSession.id.desc()))
         if session is None:
             now = assistant_clock.assistant_now()
             session = AssistantSession(scope=SCOPE, week_start=now.date()-timedelta(days=now.weekday()))
@@ -98,6 +107,7 @@ def require_draft(db, draft_id):
     draft = db.get(GrowthChangeDraft, draft_id)
     if draft is None or draft.scope != SCOPE:
         hierarchy_error("DRAFT_NOT_FOUND", "任务拆解草案不存在。", 404)
+    ensure_available(db, db.get(AssistantSession, draft.session_id), write=True)
     return draft
 
 
@@ -110,12 +120,17 @@ def _ready(db, draft, version):
         hierarchy_error("DRAFT_VERSION_CONFLICT", "草案已在其他页面修改，请重新加载。", 409)
 
 
-def edit_draft(db, draft_id, request):
+def edit_draft(db, draft_id, request, expected_token=None):
     with planning_transaction(db):
         draft = require_draft(db, draft_id)
+        from .workspace_drafts import check
+        content=request.content.model_dump(mode='json')
+        if expected_token and draft.payload.get('edit_receipt')=={'from':expected_token,'content':content}:
+            return _response(db,draft)
+        check(db,draft,expected_token)
         _ready(db, draft, request.version)
         _dates(request.content, assistant_clock.assistant_now())
-        draft.payload = {**draft.payload, "content": request.content.model_dump(mode="json"), "version": request.version+1}
+        draft.payload = {**draft.payload, "content": request.content.model_dump(mode="json"), "version": request.version+1, "edit_receipt":{"from":expected_token,"content":content}}
         return _response(db, draft)
 
 
@@ -131,6 +146,8 @@ def confirm_draft(db, draft_id, request):
         except ValidationError:
             hierarchy_error("INVALID_BREAKDOWN", "请保留至少一个合法子任务，并检查标题、时长与DDL。")
         _dates(content, assistant_clock.assistant_now())
+        if not content.parent.deadline or any(not child.deadline for child in content.children) or content.parent.title=='待命名任务':
+            hierarchy_error('DRAFT_FIELDS_REQUIRED','正式任务需要真实名称和父子截止时间；请补充后确认。',422)
         original = BreakdownCreate.model_validate(draft.payload["input"])
         _goal(db, original.goal_id)
         parent = Task(title=content.parent.title, description=content.parent.description, deadline=content.parent.deadline,

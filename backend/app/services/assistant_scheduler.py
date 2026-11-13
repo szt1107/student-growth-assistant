@@ -3,14 +3,112 @@ from copy import deepcopy
 from functools import lru_cache
 from time import monotonic
 from datetime import datetime, date, time, timedelta
+from math import ceil, isfinite
+import os
 from .scheduling_types import SHANGHAI
 from .planning_window import GRID_MINUTES, WINDOW_DAYS, expand_window_rules
 
 WEIGHTS = {'high':9,'normal':3,'low':1}
 GOAL_WEIGHTS = {1:3, 2:2, 3:1}
 STRATEGY_WEIGHTS = {'balanced':(4,3,3), 'preference':(6,2,2), 'stable':(2,6,2)}
+SPLIT_FRAGMENT_WEIGHT = .02
 SEARCH_SECONDS = 20
 SEARCH_EXPANSIONS = 50000
+
+
+def _soft_config():
+    """Request-local configuration. Zero weights recover the original ranking."""
+    settings = {}
+    for key, variable, default, upper in (
+        ('daily_load_weight', 'SGA_DAILY_LOAD_WEIGHT', .15, 1),
+        ('rest_weight', 'SGA_REST_WEIGHT', .10, 1),
+        ('continuous_minutes', 'SGA_CONTINUOUS_WORK_MINUTES', 90, 840),
+        ('break_minutes', 'SGA_MIN_BREAK_MINUTES', 15, 120),
+    ):
+        try:
+            value = float(os.getenv(variable, default))
+        except ValueError:
+            value = default
+        minimum = 0 if key.endswith('weight') else GRID_MINUTES
+        settings[key] = value if isfinite(value) and minimum <= value <= upper else default
+    return settings
+
+
+def _study_spans(spans):
+    """Union overlapping facts, retaining adjacent session boundaries."""
+    result = []
+    for start, end in sorted(set(spans)):
+        if result and start < result[-1][1]:
+            result[-1] = (result[-1][0], max(end, result[-1][1]))
+        else:
+            result.append((start, end))
+    return result
+
+
+def _rest_cost(spans, settings):
+    cost = work = 0
+    previous_end = previous_minutes = None
+    for start, end in spans:
+        minutes = end - start
+        gap = start - previous_end if previous_end is not None else settings['break_minutes']
+        if gap >= settings['break_minutes']:
+            cost += max(0, work - settings['continuous_minutes']) ** 2
+            work = 0
+        else:
+            cost += (settings['break_minutes'] - gap) * min(previous_minutes, minutes)
+        work += minutes
+        previous_end, previous_minutes = end, minutes
+    return cost + max(0, work - settings['continuous_minutes']) ** 2
+
+
+def _workload_context(week, tasks, previous, rule_intervals):
+    settings = _soft_config()
+    if not (settings['daily_load_weight'] or settings['rest_weight']):
+        return None
+    selected = {task['ref'] for task in tasks}
+    frozen = {task['ref'] for task in tasks if (task.get('profile') or {}).get('locked')}
+    spans = [(rule.start_at, rule.end_at) for rule in rule_intervals if rule.kind == 'course']
+    spans.extend(interval(item) for item in previous if item['ref'] not in selected or item['ref'] in frozen)
+    days = [[] for _ in range(WINDOW_DAYS)]
+    for start, end in spans:
+        # Clip across dates, including elapsed study on the current day.
+        for day in range(max(0, (start.date() - week).days), min(WINDOW_DAYS, (end.date() - week).days + 1)):
+            midnight = datetime.combine(week + timedelta(days=day), time.min, SHANGHAI)
+            left = max(0, (start - midnight).total_seconds() / 60)
+            right = min(1440, (end - midnight).total_seconds() / 60)
+            if left < right:
+                days[day].append((left, right))
+    days = [tuple(_study_spans(day)) for day in days]
+    return dict(settings=settings, days=days,
+                loads=[sum(end-start for start, end in day) for day in days],
+                rest=[_rest_cost(day, settings) for day in days], cost_cache={})
+
+
+def _workload_penalty(items, week, context):
+    if context is None:
+        return 0
+    additions = {}
+    minutes = 0
+    for item in items:
+        start, end = interval(item)
+        day = (start.date() - week).days
+        additions.setdefault(day, []).append((start.hour*60+start.minute, end.hour*60+end.minute))
+        minutes += (end-start).total_seconds()/60
+    load_cost = rest_cost = 0
+    for day, spans in additions.items():
+        key = (day, tuple(sorted(spans)))
+        costs = context['cost_cache'].get(key)
+        if costs is None:
+            merged = _study_spans([*context['days'][day], *spans])
+            load = sum(end-start for start, end in merged)
+            costs = (load**2 - context['loads'][day]**2,
+                     _rest_cost(merged, context['settings']) - context['rest'][day])
+            if len(context['cost_cache']) < 20000:
+                context['cost_cache'][key] = costs
+        load_cost += costs[0]
+        rest_cost += costs[1]
+    settings = context['settings']
+    return (settings['daily_load_weight']*load_cost + settings['rest_weight']*rest_cost) / (840*max(1, minutes))
 
 
 @lru_cache(maxsize=20000)
@@ -77,15 +175,21 @@ def validate_assistant(week,now,tasks,rules,items,previous):
         if sum(durations)!=t['duration_minutes']:errors.append(f"{t['title']}剩余时长未完整安排")
         limit=p.get('max_segments',4) if p.get('splittable') else 1
         if len(segments)>limit:errors.append('分段数量超过上限')
-        if len(segments)>1 and any(n<p.get('min_block_minutes',30) for n in durations[:-1]):errors.append('分段短于最小连续时长')
+        if p.get('segment_count') is not None and len(segments)!=p['segment_count']:
+            errors.append('实际分段数与指定数量不一致')
+        checked=durations if p.get('segment_count') else durations[:-1]
+        if len(segments)>1 and any(n<p.get('min_block_minutes',30) for n in checked):errors.append('分段短于最小连续时长')
+        if any((interval(right)[0]-interval(left)[1]).total_seconds()/60<p.get('min_break_minutes',0)
+            for left,right in zip(segments,segments[1:])):
+            errors.append('分段间隔短于指定要求')
         if segments and p.get('fixed_start') and dt(segments[0]['start_at'])!=dt(p['fixed_start']):errors.append('指定开始时间未满足')
         frozen=p.get('locked') or any(interval(x)[0]<=now<interval(x)[1] for x in old.get(ref,[]))
         if frozen and sorted(interval(x) for x in segments)!=sorted(interval(x) for x in old.get(ref,[])):errors.append('锁定或已开始分段被修改')
     return errors
 
 
-def score(items,tasks,old,week,preferences=None,strategy='balanced'):
-    moved=miss=avoid=temporary_avoid=buffer=distance=early=goal_penalty=preference_capacity=0
+def score(items,tasks,old,week,preferences=None,strategy='balanced',workload=None):
+    moved=miss=avoid=temporary_avoid=buffer=distance=early=goal_penalty=preference_capacity=fragments=0
     preferences=preferences or {}
     total_weight=sum(WEIGHTS[t['priority']] for t in tasks.values()) or 1
     grouped=old_segments(items)
@@ -97,6 +201,10 @@ def score(items,tasks,old,week,preferences=None,strategy='balanced'):
             moved+=WEIGHTS[t['priority']]
             distance+=abs((start-min(interval(x)[0] for x in before)).total_seconds())/60
         profile=(t.get('profile') or {})
+        if (profile.get('segment_count') or 1)>1:
+            preferred=min(30,t['duration_minutes']/profile['segment_count'])
+            lengths=[(interval(item)[1]-interval(item)[0]).total_seconds()/60 for item in segments]
+            fragments+=WEIGHTS[t['priority']]*sum((max(0,preferred-length)/preferred)**2 for length in lengths)/profile['segment_count']
         preference=profile.get('preferred_windows') or []
         category=(t.get('task_type') or 'other')
         preference_map=preferences.get('task_windows') or {}
@@ -123,6 +231,8 @@ def score(items,tasks,old,week,preferences=None,strategy='balanced'):
     movement_penalty=moved/total_weight
     buffer_penalty=buffer/total_weight
     composite=(weights[0]*preference_penalty+weights[1]*movement_penalty+weights[2]*buffer_penalty)/sum(weights)
+    composite += _workload_penalty(items, week, workload)
+    composite += SPLIT_FRAGMENT_WEIGHT*fragments/total_weight
     return composite,movement_penalty,preference_penalty,buffer_penalty,goal_penalty,distance,early,tuple((x['ref'],x['start_at']) for x in items)
 
 
@@ -160,28 +270,60 @@ def _split_options(task,starts,week,now,busy,old,preferences,strategy):
     for a,b in sorted(set(cells)):
         if spans and spans[-1][1]==a:spans[-1]=(spans[-1][0],b)
         else:spans.append((a,b))
-    def pack(spans):
+    requested=p.get('segment_count')
+    minimum=p.get('min_block_minutes',30)
+    def pack(spans,allocation='full',gap=0):
         left=task['duration_minutes']; result=[]
-        for a,b in spans:
+        pending=list(spans)
+        while pending:
+            a,b=pending.pop(0)
+            if any(overlaps(a,b,*interval(item)) for item in result):continue
             fixed=p.get('fixed_start')
             if fixed and not result:
                 if not a<=dt(fixed)<b:continue
                 a=dt(fixed)
             capacity=int((b-a).total_seconds()/60)
             take=min(capacity,left)
+            if requested:
+                needed=requested-len(result)
+                if needed<=0:break
+                if needed==1 and capacity<left:continue
+                take=min(take,left-minimum*(needed-1))
+                if allocation=='balanced' and needed>1:
+                    take=min(take,max(minimum,((left+needed*5-1)//(needed*5))*5))
+                if allocation=='capacity' and needed>1:
+                    chunks=max(1,needed-len(pending))
+                    take=min(take,max(minimum,(min(capacity,left)//(chunks*5))*5))
             if take<p.get('min_block_minutes',30) and take!=left:continue
             if take<=0:continue
+            if requested and result:
+                if any(abs((a-interval(item)[1]).total_seconds())/60<gap or
+                    abs((interval(item)[0]-(a+timedelta(minutes=take))).total_seconds())/60<gap for item in result):continue
             result.append(dict(ref=task['ref'],title=task['title'],start_at=a.isoformat(),end_at=(a+timedelta(minutes=take)).isoformat()))
             left-=take
-            if not left:return sorted(result,key=lambda x:x['start_at'])
+            if not left:
+                return sorted(result,key=lambda x:x['start_at']) if not requested or len(result)==requested else None
             if len(result)>=p.get('max_segments',4):break
+            cursor=a+timedelta(minutes=take+gap)
+            if requested and cursor<b:pending.insert(0,(cursor,b))
         return None
     orders=[spans, sorted(spans,key=lambda span:(-(span[1]-span[0]).total_seconds(),span[0]))]
+    rest_minutes=ceil(_soft_config()['break_minutes']/GRID_MINUTES)*GRID_MINUTES
+    if requested:
+        anchors=[dt(window['start_at']) for window in p.get('preferred_windows',[])][:14]
+        rest=timedelta(minutes=rest_minutes)
+        anchors.extend([begin+rest for begin,finish in spans if begin+rest<finish][:28])
+        orders.extend([[(max(a,anchor),b) for a,b in spans if b>anchor] for anchor in anchors])
     options=[]
     for ordered in orders:
-        result=pack(ordered)
-        if result and len(result)>1 and not validate_assistant(week,now,[task],[],result,old.get(task['ref'],[])):
-            options.append(result)
+        preferred_gap=p.get('min_break_minutes') or rest_minutes
+        modes=[('balanced',preferred_gap),('capacity',preferred_gap),
+            ('balanced',p.get('min_break_minutes',0)),('capacity',p.get('min_break_minutes',0)),
+            ('full',p.get('min_break_minutes',0))] if requested else [('full',0)]
+        for allocation,gap in modes:
+            result=pack(ordered,allocation,gap)
+            if result and len(result)>1 and not validate_assistant(week,now,[task],[],result,old.get(task['ref'],[])):
+                if not any(_schedule_key(result)==_schedule_key(option) for option in options):options.append(result)
     return options
 
 
@@ -189,7 +331,8 @@ def _arrange_single(week,now,tasks,rules,previous,allow_alternatives=True,prefer
     until=monotonic()+SEARCH_SECONDS
     old=old_segments([x for x in previous if dt(x['end_at'])>now]); intervals=expand_window_rules(week,rules)
     busy=[(x.start_at,x.end_at) for x in intervals]
-    by_ref={t['ref']:t for t in tasks}; choices={}; diagnostics=[]
+    workload = _workload_context(week, tasks, previous, intervals)
+    by_ref={t['ref']:t for t in tasks}; choices={}; daily_choices={}; diagnostics=[]
     # Two explicit hard start times cannot be resolved by searching other slots.
     fixed=[t for t in tasks if (t.get('profile') or {}).get('fixed_start') and not (t.get('profile') or {}).get('splittable')]
     for index,left in enumerate(fixed):
@@ -207,10 +350,15 @@ def _arrange_single(week,now,tasks,rules,previous,allow_alternatives=True,prefer
         if frozen:
             candidates=[before] if before and not validate_assistant(week,now,[t],rules,before,before) else []
         else:
-            candidates=[[item_for(t,start)] for start in starts if t['duration_minutes']<=840 and allowed(t,start,start+timedelta(minutes=t['duration_minutes']),week,now,busy,old)]
+            candidates=[] if (p.get('segment_count') or 1)>1 else [[item_for(t,start)] for start in starts if t['duration_minutes']<=840 and allowed(t,start,start+timedelta(minutes=t['duration_minutes']),week,now,busy,old)]
             if not candidates:candidates+=_split_options(t,starts,week,now,busy,old,preferences,strategy)
-        candidates.sort(key=lambda pack:(len(pack),score(pack,by_ref,old,week,preferences,strategy)))
+        candidates.sort(key=lambda pack:(len(pack),score(pack,by_ref,old,week,preferences,strategy,workload)))
         choices[t['ref']]=candidates
+        if workload is not None:
+            buckets={}
+            for index,pack in enumerate(candidates):
+                buckets.setdefault(interval(pack[0])[0].date(),[]).append((index,pack))
+            daily_choices[t['ref']]=buckets.values()
         if not candidates:
             code='NO_CONTINUOUS_SLOT';message=f"{t['title']}：当前约束下没有完整可用时段。"
             if p.get('fixed_start'):
@@ -238,17 +386,30 @@ def _arrange_single(week,now,tasks,rules,previous,allow_alternatives=True,prefer
         for state in beam:
             occupied=[interval(x) for x in state]
             candidates=[]
-            for pack in choices[t['ref']]:
-                if not any(overlaps(*interval(x),a,b) for x in pack for a,b in occupied):candidates.append(pack)
+            covered=[]
+            if workload is not None:
+                # Reuse day buckets instead of rescanning the entire fortnight
+                # for every beam state. Retain the global ranking order exactly.
+                for bucket in daily_choices[t['ref']]:
+                    count=0
+                    for index,pack in bucket:
+                        if any(overlaps(*interval(x),a,b) for x in pack for a,b in occupied):continue
+                        covered.append((index,pack));count+=1
+                        if count==4:break
+                covered.sort(key=lambda entry:entry[0])
+                candidates=[pack for _,pack in covered]
+            selected={index for index,_ in covered}
+            for index,pack in enumerate(choices[t['ref']]):
+                if index in selected or any(overlaps(*interval(x),a,b) for x in pack for a,b in occupied):continue
+                candidates.append(pack)
                 if len(candidates)==64:break
             if not candidates and (t.get('profile') or {}).get('splittable'):
                 candidates+=_split_options(t,starts,week,now,busy+occupied,old,preferences,strategy)
-            # Score each expanded state once. Both stable sorts use precisely
-            # the former keys/order; no cross-request cache or search change.
+            # Score each expanded state once before applying the beam cap.
             ranked=[]
             for pack in candidates:
                 solution=state+pack
-                ranked.append((len(pack),score(solution,by_ref,old,week,preferences,strategy),solution))
+                ranked.append((len(pack),score(solution,by_ref,old,week,preferences,strategy,workload),solution))
             ranked.sort(key=lambda entry:entry[:2])
             for _,rank,solution in ranked[:64]:
                 expansions+=1
@@ -262,6 +423,17 @@ def _arrange_single(week,now,tasks,rules,previous,allow_alternatives=True,prefer
         if not expanded:return dict(status='no_plan',items=[],alternatives=[],diagnostics=[dict(code='NO_PLAN_FOUND',message='有界搜索未找到完整方案；这不等于证明无解。')])
         expanded.sort(key=lambda entry:entry[:2])
         beam=[entry[2] for entry in expanded[:64]]
+        if workload is not None:
+            # Reserve one original-ranking path inside the existing beam cap.
+            # A tight deadline can require packing without the preferred gaps.
+            weights=STRATEGY_WEIGHTS.get(strategy,STRATEGY_WEIGHTS['balanced'])
+            def original_order(entry):
+                rank=entry[1]
+                composite=(weights[0]*rank[2]+weights[1]*rank[1]+weights[2]*rank[3])/sum(weights)
+                return entry[0], (composite,*rank[1:])
+            guard=min(expanded,key=original_order)[2]
+            if not any(_schedule_key(state)==_schedule_key(guard) for state in beam):
+                beam[-1]=guard
     pool=[];seen=set()
     for state in beam:
         key=_schedule_key(state)

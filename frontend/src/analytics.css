@@ -1,3 +1,4 @@
+@layer legacy {
 .growth-analytics { min-width: 0; }
 .analytics-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
 .analytics-controls label { display: grid; gap: 4px; font-size: .88rem; }
@@ -30,4 +31,6 @@
   .analytics-chart { overflow-x: auto; }
   .analytics-chart svg { min-width: 600px; }
   .growth-analytics .goal-card, .analytics-definitions { min-width: 0; overflow-wrap: anywhere; }
+}
+
 }

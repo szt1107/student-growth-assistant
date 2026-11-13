@@ -12,15 +12,17 @@ from sqlalchemy.orm import Session
 from . import models  # Register all tables with the existing Base.
 from .models import AssistantRun
 from .database import Base, engine
-from .routers import dashboard, constraints, data, execution, goals, growth, plan_explanations, plans, tasks, task_breakdown, time_rules, assistant, taxonomy
+from .routers import dashboard, constraints, data, execution, goals, growth, plan_explanations, plans, tasks, task_breakdown, time_rules, assistant, taxonomy, conversations, workspace, secretary
 from .services.growth_migrations import apply_growth_migrations
 from .services.growth_data import create_daily_backup
 from .services.schema_migrations import upgrade_database
 from .services.planning_state import get_or_create_planning_state
+from .codex.speech import router as speech_router, speech_lifespan
 
 
 class HealthResponse(BaseModel):
     status: str
+    runtime: dict
 
 
 @asynccontextmanager
@@ -34,8 +36,18 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         get_or_create_planning_state(session)
         for run in session.query(AssistantRun).filter(AssistantRun.status=='running').all():
             run.status='interrupted'; run.phase='interrupted'
+            if run.payload.get('kind') == 'conversation':
+                output = session.get(models.AssistantMessage, run.payload.get('assistant_message_id'))
+                if output:
+                    output.content = {**(output.content or {}), 'status': 'interrupted'}
         session.commit()
-    yield
+    from .services.claude_client import ai_client_session
+    async with ai_client_session(), speech_lifespan(application):
+        try:
+            yield
+        finally:
+            from .services.conversation_runs import shutdown
+            await shutdown(application.state.db_engine)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -43,7 +55,7 @@ app.state.db_engine = engine
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174", "http://localhost:5175", "http://127.0.0.1:5175", "http://127.0.0.1:5187"],
-    allow_methods=["GET", "POST", "PATCH", "PUT"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
     allow_headers=["Content-Type"],
 )
 app.include_router(dashboard.router)
@@ -55,14 +67,33 @@ app.include_router(plans.router)
 app.include_router(constraints.router)
 app.include_router(plan_explanations.router)
 app.include_router(assistant.router)
+app.include_router(conversations.router)
+app.include_router(workspace.router)
+app.include_router(secretary.router)
 app.include_router(taxonomy.categories_router)
 app.include_router(taxonomy.preferences_router)
 app.include_router(taxonomy.settings_router)
 app.include_router(goals.router)
 app.include_router(growth.router)
 app.include_router(data.router)
+from .codex.calendar_api import router as calendar_router
+app.include_router(calendar_router)
+from .codex import speech_realtime
+app.include_router(speech_router)
 
 
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])
 def health() -> HealthResponse:
-    return HealthResponse(status="ok")
+    # Code objects identify loaded code, not newer source bytes on disk. This
+    # endpoint never reads configuration, a database or provider credentials.
+    import hashlib
+    import marshal
+    from .services import conversation_tools,ai_skills
+    available=True;hashes={}
+    try:
+        for name in ('core',*ai_skills.CAPABILITIES):
+            hashes[name]=hashlib.sha256(ai_skills.load_skill(name).encode()).hexdigest()[:12]
+    except Exception:available=False
+    return HealthResponse(status="ok",runtime={'protocol':getattr(conversation_tools,'RUNTIME_PROTOCOL',None),
+        'process_id':os.getpid(),'code_hash':hashlib.sha256(marshal.dumps(conversation_tools.prepare.__code__)).hexdigest()[:12],
+        'skills_available':available,'skill_hashes':hashes})

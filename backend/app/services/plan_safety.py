@@ -63,12 +63,8 @@ def prepare_plan_rules(
             "当前安排包含分段、锁定、指定时段或已开始的记录，请在规划工作台调整，以保留原有记录。",
         )
 
-    rules = [TimeRuleInput(
-        id=rule.id, kind=rule.kind.value, title=rule.title,
-        recurrence=rule.recurrence.value, start_time=rule.start_time,
-        end_time=rule.end_time, weekday=rule.weekday, date=rule.date,
-        active=rule.active,
-    ) for rule in db.scalars(select(TimeRule).order_by(TimeRule.id)).all()]
+    from .assistant_state import time_rules
+    rules = time_rules(db)
     next_id = max((rule.id for rule in rules), default=0) + 1
     for offset in range(7):
         day = week_start + timedelta(days=offset)

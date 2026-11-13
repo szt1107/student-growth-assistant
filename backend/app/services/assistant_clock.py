@@ -1,4 +1,4 @@
-"""A fixed clock is available only for isolated, explicitly named demo databases."""
+"""Real Shanghai time for normal use; isolated demos keep their fixed scenario."""
 import os
 import json
 from pathlib import Path
@@ -28,7 +28,7 @@ def clock_settings() -> dict:
         now = now.astimezone(SHANGHAI)
     else:
         now = datetime.now(SHANGHAI)
-    return {'demo': demo, 'now': now.isoformat(), 'week_start': (now.date()).fromordinal(now.date().toordinal()-now.weekday()).isoformat()}
+    return {'demo': demo, 'clock_mode': 'fixed' if demo else 'realtime', 'now': now.isoformat(), 'week_start': (now.date()).fromordinal(now.date().toordinal()-now.weekday()).isoformat()}
 
 
 def assistant_now() -> datetime:

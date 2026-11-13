@@ -2,10 +2,11 @@
 
 from datetime import date as DateValue, datetime, time, timezone
 from enum import Enum
+from uuid import uuid4
 
 from sqlalchemy import (
     Boolean, CheckConstraint, Date, Enum as SqlEnum, ForeignKey, Index,
-    Integer, JSON, String, Text, Time, text,
+    Integer, JSON, String, Text, Time, text, event, select, update, case,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,6 +16,16 @@ from .database import Base, UTCDateTime
 def utc_now() -> datetime:
     """Return a timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc)
+
+
+def workspace_owner(context):
+    """Server-local mapping, not an authenticated user or a client supplied ID."""
+    return context.connection.scalar(select(WorkspaceMetadata.owner_id).where(WorkspaceMetadata.id == 1)) or 'local'
+
+
+def message_owner(context):
+    return context.connection.scalar(select(AssistantSession.owner_id).where(
+        AssistantSession.id == context.get_current_parameters()['session_id'])) or workspace_owner(context)
 
 
 class TaskPriority(str, Enum):
@@ -157,6 +168,30 @@ class PlanningState(Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class CalendarEntry(Base):
+    __tablename__ = 'calendar_entries'
+    __table_args__ = (CheckConstraint('end_at > start_at', name='calendar_positive_interval'),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_key: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
+    source_rule_id: Mapped[int | None] = mapped_column(ForeignKey('time_rules.id'), nullable=True)
+    source_date: Mapped[DateValue | None] = mapped_column(Date, nullable=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default='', nullable=False)
+    start_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
+    end_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    blocks_time: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class CalendarMutation(Base):
+    __tablename__ = 'calendar_mutations'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class CourseImport(Base):
     __tablename__ = 'course_imports'
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -173,11 +208,25 @@ class TaskSchedulingProfile(Base):
 
 class AssistantSession(Base):
     __tablename__ = 'assistant_sessions'
+    __table_args__ = (
+        Index('conversation_create_once', 'owner_id', 'client_request_id', unique=True),
+        Index('conversation_owner_activity', 'owner_id', 'deleted_at', 'archived_at', 'last_activity_at', 'id'),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    week_start: Mapped[DateValue] = mapped_column(Date)
+    week_start: Mapped[DateValue | None] = mapped_column(Date, nullable=True)
     latest_proposal_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     scope: Mapped[str] = mapped_column(String(20), nullable=False, default='planning')
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+    owner_id: Mapped[str] = mapped_column(String(36), default=workspace_owner, server_default='local')
+    title: Mapped[str] = mapped_column(String(160), default='新对话', server_default='新对话')
+    title_source: Mapped[str] = mapped_column(String(20), default='default', server_default='default')
+    client_request_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default='1')
+    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=utc_now, nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=utc_now, nullable=True)
+    pinned_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
 class AssistantProposal(Base):
@@ -193,7 +242,10 @@ class AssistantProposal(Base):
 
 class AssistantMessage(Base):
     __tablename__ = 'assistant_messages'
-    __table_args__ = (Index('assistant_message_once', 'session_id', 'client_message_id', unique=True),)
+    __table_args__ = (
+        Index('assistant_message_once', 'session_id', 'client_message_id', unique=True),
+        Index('conversation_message_page', 'owner_id', 'session_id', 'id'),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     session_id: Mapped[int] = mapped_column(ForeignKey('assistant_sessions.id'))
     client_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -201,6 +253,9 @@ class AssistantMessage(Base):
     text: Mapped[str] = mapped_column(Text)
     proposal_id: Mapped[int | None] = mapped_column(ForeignKey('assistant_proposals.id'), nullable=True)
     content: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    owner_id: Mapped[str] = mapped_column(String(36), default=message_owner, server_default='local')
+    # Existing messages remain NULL after migration; their precise time is unknown.
+    created_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=utc_now, nullable=True)
 
 
 class GrowthChangeDraft(Base):
@@ -431,3 +486,54 @@ class WorkspaceMetadata(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     workspace_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now, nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), default=lambda: str(uuid4()), server_default='local', nullable=False)
+
+
+class MemoryEntry(Base):
+    """Independent, explicitly confirmed context, never a scheduling constraint."""
+    __tablename__ = 'memory_entries'
+    __table_args__ = (Index('memory_once', 'owner_id', 'client_request_id', unique=True),
+        Index('memory_active', 'owner_id', 'status', 'updated_at', 'id'))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False, default=workspace_owner)
+    client_request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    sources: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    receipt: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+
+class ReviewRecord(Base):
+    """Explicitly saved review, separate from legacy generated weekly text."""
+    __tablename__ = 'review_records'
+    __table_args__ = (Index('review_record_once', 'owner_id', 'client_request_id', unique=True),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False, default=workspace_owner)
+    client_request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    period: Mapped[str] = mapped_column(String(10), nullable=False)
+    start_date: Mapped[DateValue] = mapped_column(Date, nullable=False)
+    end_date: Mapped[DateValue] = mapped_column(Date, nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    conclusion: Mapped[str] = mapped_column(Text, nullable=False)
+    next_steps: Mapped[str] = mapped_column(Text, nullable=False, default='')
+    facts: Mapped[dict] = mapped_column(JSON, nullable=False)
+    sources: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    history: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+
+@event.listens_for(AssistantMessage, 'after_insert')
+def touch_conversation(mapper, connection, message):
+    if message.created_at is not None:
+        connection.execute(update(AssistantSession).where(
+            AssistantSession.id == message.session_id, AssistantSession.owner_id == message.owner_id,
+        ).values(last_activity_at=case(
+            (AssistantSession.last_activity_at > message.created_at, AssistantSession.last_activity_at),
+            else_=message.created_at)))

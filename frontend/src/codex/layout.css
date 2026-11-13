@@ -1,0 +1,80 @@
+/* Shared alignment and responsive grouping for the workspace. */
+.compact-shell.v2-shell .v2-grid { grid-template-rows:60px auto minmax(0,1fr) }
+.compact-shell.v2-shell .v2-navigation,.compact-shell.v2-shell .v2-conversations { grid-row:1 / span 3 }
+.v2-topbar { grid-column:3 / -1;grid-row:1;display:grid;grid-template-columns:minmax(0,1fr) auto 36px;align-items:center;gap:8px;padding:10px 24px;box-sizing:border-box;min-width:0;border-bottom:1px solid #edf3ef;background:var(--sga-surface) }
+.compact-shell.v2-shell .v2-topbar .workspace-clock { grid-column:1;justify-self:start;margin-left:0 }
+.v2-topbar .v2-sidebar-toggle { grid-column:3 }
+.v2-topbar .v2-sidebar-toggle { position:static;display:flex;align-items:center }
+.compact-shell.v2-shell .v2-chat,.compact-shell.v2-shell .v2-tool-page[data-placement=primary] { grid-row:2 / span 2;padding:20px 24px }
+.compact-shell.v2-shell .v2-chat-heading,.compact-shell.v2-shell .v2-primary-page-heading,.compact-shell.v2-shell[data-panel=collapsed][data-navigation=home] .v2-chat-heading { min-height:0;height:0;margin:0;padding:0 }
+.compact-shell.v2-shell .v2-workspace { grid-row:2 }
+.compact-shell.v2-shell .v2-workspace-heading { min-height:52px;padding:8px 12px;box-sizing:border-box;align-items:center }
+.compact-shell.v2-shell .v2-tool-page[data-placement=auxiliary] { grid-row:3;padding:16px }
+.compact-shell.v2-shell .v2-resizer { grid-row:2 / span 2 }
+.compact-shell.v2-shell .v2-mobile-switch { padding-right:8px;gap:4px }
+
+.dayflow-workspace { container-type:inline-size;container-name:calendar }
+.dayflow-workspace .dayflow-toolbar { display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:12px;padding:12px 16px }
+.dayflow-workspace .dayflow-period { display:flex;align-items:center;gap:8px;min-width:0 }
+.dayflow-workspace .dayflow-period strong { margin:0;font-size:17px;font-weight:600;line-height:1.5;white-space:nowrap }
+.dayflow-workspace .dayflow-date-nav { display:flex;align-items:center;justify-content:flex-end;gap:0;flex:none;flex-wrap:nowrap;min-width:0 }
+.dayflow-workspace .dayflow-views { display:flex;gap:2px;flex:none;flex-wrap:nowrap;width:auto;padding:3px;border-radius:10px;background:var(--sga-muted) }
+.dayflow-workspace .dayflow-views .sga-button { flex:1;min-width:30px;white-space:nowrap }
+.dayflow-workspace .dayflow-create { justify-self:end;white-space:nowrap }
+.dayflow-workspace[data-compact] .dayflow-toolbar { padding:8px 0 12px;gap:8px }
+.dayflow-workspace[data-compact] .dayflow-canvas { height:max(420px,calc(100dvh - 240px)) }
+@container calendar (max-width:760px) {
+ .dayflow-workspace .dayflow-toolbar { grid-template-columns:minmax(0,1fr) auto;gap:8px }
+ .dayflow-period { grid-column:1;grid-row:1 }
+ .dayflow-date-nav { grid-column:2;grid-row:1 }
+ .dayflow-views { grid-column:1;grid-row:2;align-self:stretch }
+ .dayflow-create { grid-column:2;grid-row:2;align-self:center }
+}
+@container calendar (max-width:420px) {
+ .dayflow-workspace .dayflow-toolbar { padding:8px;gap:8px }
+ .dayflow-workspace[data-compact] .dayflow-toolbar { padding:8px 0 12px }
+ .dayflow-workspace .dayflow-period strong { font-size:15px }
+ .dayflow-period-year { display:none }
+ .dayflow-workspace .dayflow-create { width:44px;height:44px;min-height:44px;box-sizing:border-box;justify-content:center }
+ .dayflow-create-label { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap }
+}
+
+.compact-shell.v2-shell .profile-page { width:100%;max-width:none;margin-inline:0;box-sizing:border-box }
+.compact-shell.v2-shell .review-workspace { width:100%;max-width:none;margin-inline:0;box-sizing:border-box }
+.profile-toolbar { display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:20px }
+.compact-shell.v2-shell .profile-toolbar .profile-sections { flex-wrap:nowrap;gap:2px;margin:0;min-width:0 }
+.profile-ai-action { flex-shrink:0 }
+.compact-shell.v2-shell .profile-page .growth-section-heading { align-items:center;margin-bottom:16px }
+.compact-shell.v2-shell .profile-page .growth-section-heading h3 { margin:0 }
+.compact-shell.v2-shell .profile-page .growth-form { width:100%;max-width:none;box-sizing:border-box;margin:0 0 24px;padding:20px;border:1px solid var(--sga-border);border-radius:16px;background:#fbfcfb }
+.compact-shell.v2-shell .profile-page .growth-form>h4 { margin:0 }
+.compact-shell.v2-shell .profile-page .preference-rule-card { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:16px }
+.compact-shell.v2-shell .profile-page .preference-rule-actions { align-self:start;display:flex;gap:4px;margin:0 }
+.profile-page .growth-form>.button-row,.review-record-editor>.button-row { display:flex;justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:4px }
+.compact-shell.v2-shell .review-range-toolbar { display:flex;align-items:center;justify-content:flex-start;gap:12px;flex-wrap:wrap;padding:12px 0;margin:0 }
+.review-range-toolbar>[role=group],.review-range-toolbar .review-date-navigation { display:flex;align-items:center;gap:2px }
+.review-range-toolbar .review-date-navigation input { width:154px }
+.review-range-toolbar>button { margin:0 }
+
+@media(max-width:1023px) {
+ .compact-shell.v2-shell .v2-grid { grid-template-rows:56px auto minmax(0,1fr) auto }
+ .v2-topbar { grid-column:1;grid-row:1;grid-template-columns:minmax(0,1fr) auto 44px;padding:6px 12px }
+ .compact-shell.v2-shell .v2-navigation { grid-row:4 }
+ .compact-shell.v2-shell .v2-conversations,.compact-shell.v2-shell .v2-chat,.compact-shell.v2-shell .v2-tool-page[data-placement=primary] { grid-row:2 / span 2 }
+ .compact-shell.v2-shell .v2-chat,.compact-shell.v2-shell .v2-tool-page[data-placement=primary] { padding:16px }
+ .compact-shell.v2-shell .v2-workspace { grid-row:2 }
+ .compact-shell.v2-shell .v2-tool-page[data-placement=auxiliary] { grid-row:3;padding:12px }
+ .compact-shell.v2-shell .v2-workspace-heading { padding:6px 12px }
+}
+@media(max-width:600px) {
+ .profile-toolbar { gap:8px;margin-bottom:16px }
+ .compact-shell.v2-shell .profile-toolbar .profile-sections { width:100%;box-sizing:border-box;gap:1px;justify-content:space-between }
+ .profile-toolbar .profile-sections [role=tab] { font-size:13px;padding-left:8px;padding-right:8px;white-space:nowrap }
+ .profile-toolbar .profile-ai-action { justify-content:flex-start;margin:0 }
+ .compact-shell.v2-shell .profile-page .growth-form { padding:16px }
+ .compact-shell.v2-shell .profile-page .preference-rule-card { grid-template-columns:minmax(0,1fr);gap:8px }
+ .compact-shell.v2-shell .profile-page .preference-rule-actions { justify-content:flex-start }
+ .compact-shell.v2-shell .profile-page .growth-form-row { grid-template-columns:minmax(0,1fr) }
+ .compact-shell.v2-shell .review-range-toolbar { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px }
+ .review-range-toolbar>.review-date-navigation { grid-column:1 / -1;grid-row:2;justify-content:space-between }
+}

@@ -1,0 +1,27 @@
+/* Scoped overrides for DayFlow's unlayered library CSS. */
+.dayflow-workspace .df-calendar-container { height:100%;--df-calendar-height:100%;border:0;border-radius:0;box-shadow:none;font-family:inherit;color-scheme:light }
+.dayflow-workspace .df-right-panel { display:none }
+.dayflow-workspace .df-day-content[data-switcher-mode] { width:100%;flex:1;min-width:0;border-right:0 }
+.dayflow-workspace .df-view-header-title { font-size:17px;font-weight:600;line-height:1.5 }
+.dayflow-workspace .df-view-header-subtitle { margin-top:2px;font-size:12px }
+.dayflow-workspace .df-view-header-container { display:none }
+/* Let both columns share the sidebar's natural height instead of stopping
+   the time grid at a fixed 680px and leaving a blank strip below it. */
+@media (min-width:768px) {
+ .dayflow-workspace:not([data-compact]) .dayflow-canvas { height:auto;min-height:680px;align-self:stretch }
+ .dayflow-workspace:not([data-compact]) .dayflow-canvas>.df-calendar-wrapper { position:absolute;inset:0;height:100% }
+}
+/* DayFlow truncates short weekday names to their first letter. For zh-CN
+   that produces seven identical “周” labels. Our week starts on Monday. */
+.dayflow-workspace .df-compact-header-label { font-size:0 }
+.dayflow-workspace .df-compact-header-label::after { font-size:12px }
+.dayflow-workspace .df-compact-header-label-cell:nth-child(1) .df-compact-header-label::after { content:"一" }
+.dayflow-workspace .df-compact-header-label-cell:nth-child(2) .df-compact-header-label::after { content:"二" }
+.dayflow-workspace .df-compact-header-label-cell:nth-child(3) .df-compact-header-label::after { content:"三" }
+.dayflow-workspace .df-compact-header-label-cell:nth-child(4) .df-compact-header-label::after { content:"四" }
+.dayflow-workspace .df-compact-header-label-cell:nth-child(5) .df-compact-header-label::after { content:"五" }
+.dayflow-workspace .df-compact-header-label-cell:nth-child(6) .df-compact-header-label::after { content:"六" }
+.dayflow-workspace .df-compact-header-label-cell:nth-child(7) .df-compact-header-label::after { content:"日" }
+/* The page itself is a programmatic focus target, not a boxed control. */
+.compact-shell.v2-shell #v2-page-schedule:focus,
+.compact-shell.v2-shell #v2-page-schedule:focus-visible { outline:none }
