@@ -2,6 +2,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import './codex/theme.css'
+import './beautify.css'
 import { ConfirmationProvider } from './codex/ui/confirmation-provider.jsx'
 
 createRoot(document.getElementById('root')).render(
