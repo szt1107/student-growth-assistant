@@ -108,7 +108,8 @@ def _availability(task, now, week_start, fixed_busy, assigned, profile):
     spans=[]
     for offset in range(WINDOW_DAYS):
         day=week_start+timedelta(days=offset)
-        left=max(now,datetime.combine(day,time(8),SHANGHAI));right=min(end,datetime.combine(day,time(22),SHANGHAI))
+        midnight=datetime.combine(day,time.min,SHANGHAI)
+        left=max(now,midnight);right=min(end,midnight+timedelta(days=1))
         if left>=right:continue
         cursor=left
         for a,b in busy:
@@ -118,6 +119,12 @@ def _availability(task, now, week_start, fixed_busy, assigned, profile):
             cursor=max(cursor,b)
             if cursor>=right:break
         if cursor<right:spans.append((cursor,right))
+    # A free interval does not end just because the calendar date changes.
+    merged=[]
+    for left,right in spans:
+        if merged and merged[-1][1]==left:merged[-1]=(merged[-1][0],right)
+        else:merged.append((left,right))
+    spans=merged
     t=dict(ref=f'task:{task.id}',title=task.title,duration_minutes=task.duration_minutes,
         deadline=deadline.isoformat(),priority=task.priority.value,profile=profile)
     previous=[dict(ref=t['ref'],title=task.title,start_at=a.isoformat(),end_at=b.isoformat()) for a,b in assigned.get(task.id,[]) if b>now]

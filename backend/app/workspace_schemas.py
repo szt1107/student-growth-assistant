@@ -5,7 +5,7 @@ from pydantic import AwareDatetime, Field, model_validator
 from .assistant_schemas import StrictModel, Action, ConversationMessageCreate, Window
 from .task_breakdown_schemas import BreakdownCreate, BreakdownContent, DEFAULT_WORK_MINUTES
 
-DRAFT_DEFAULTS = {'duration_minutes':DEFAULT_WORK_MINUTES,'start_time':'09:00','title':'待命名任务',
+DRAFT_DEFAULTS = {'duration_minutes':DEFAULT_WORK_MINUTES,'start_time':'08:00','title':'待命名任务',
     'priority':'normal','segments':1,'break_minutes':0,'deadline':None}
 
 
@@ -90,15 +90,15 @@ class PlanningArgs(StrictModel):
 class SchedulePreview(StrictModel):
     """Editable intent; a completion window is never a formal deadline."""
     title: str = Field(default=DRAFT_DEFAULTS['title'], min_length=1, max_length=200)
-    duration_minutes: int = Field(default=DRAFT_DEFAULTS['duration_minutes'], strict=True, ge=5, le=840, multiple_of=5)
+    duration_minutes: int = Field(default=DRAFT_DEFAULTS['duration_minutes'], strict=True, ge=5, le=1440, multiple_of=5)
     day: date
     start_time: str = Field(default=DRAFT_DEFAULTS['start_time'], pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
     start_exact: bool = False
-    time_period: Literal['morning', 'noon', 'afternoon', 'evening'] | None = None
+    time_period: Literal['dawn', 'morning', 'noon', 'afternoon', 'evening'] | None = None
     deadline: AwareDatetime | None = None
     priority: Literal['high', 'normal', 'low'] = 'normal'
     segments: int = Field(default=1, strict=True, ge=1, le=8)
-    min_block_minutes: int = Field(default=5, strict=True, ge=5, le=840, multiple_of=5)
+    min_block_minutes: int = Field(default=5, strict=True, ge=5, le=1440, multiple_of=5)
     break_minutes: int = Field(default=0, strict=True, ge=0, le=120, multiple_of=5)
     task_id: int | None = Field(default=None, strict=True, ge=1)
     work_segments: list[Window] = Field(default_factory=list, max_length=8)

@@ -58,6 +58,7 @@ def envelope(db,kind,id):
     if requires_recalculation:
         links=[];schedule_adjustments=[]
         if status=='ready':status='needs_input'
+        problems=[problem for problem in problems if problem['code']=='SOURCE_CHANGED']
         problems.append(dict(code='RECALCULATION_REQUIRED',message='这份旧草案需要按原来的时间要求重新计算。',
             suggestion='请点击“保存草案编辑”，核对更新后的安排，再确认采用。'))
     return dict(kind=kind,id=id,version=version(row),status=status,source_revision=row.source_revision,

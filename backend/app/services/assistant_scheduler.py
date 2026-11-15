@@ -7,6 +7,7 @@ from math import ceil, isfinite
 import os
 from .scheduling_types import SHANGHAI
 from .planning_window import GRID_MINUTES, WINDOW_DAYS, expand_window_rules
+from .grid import DAY_MINUTES, valid_task_interval
 
 WEIGHTS = {'high':9,'normal':3,'low':1}
 GOAL_WEIGHTS = {1:3, 2:2, 3:1}
@@ -91,8 +92,11 @@ def _workload_penalty(items, week, context):
     minutes = 0
     for item in items:
         start, end = interval(item)
-        day = (start.date() - week).days
-        additions.setdefault(day, []).append((start.hour*60+start.minute, end.hour*60+end.minute))
+        for day in range((start.date()-week).days, min(WINDOW_DAYS,(end.date()-week).days+1)):
+            midnight=datetime.combine(week+timedelta(days=day),time.min,SHANGHAI)
+            left=max(0,(start-midnight).total_seconds()/60)
+            right=min(DAY_MINUTES,(end-midnight).total_seconds()/60)
+            if left<right:additions.setdefault(day,[]).append((left,right))
         minutes += (end-start).total_seconds()/60
     load_cost = rest_cost = 0
     for day, spans in additions.items():
@@ -144,8 +148,8 @@ def allowed(task,start,end,week,now,busy,old,fragment=False):
     preserved=any(interval(x)==(start,end) for x in before)
     frozen=p.get('locked') or any(interval(x)[0]<=now<interval(x)[1] for x in before)
     if start<now and not (preserved and start<=now<end):return False
-    if not week<=start.date()<week+timedelta(days=WINDOW_DAYS) or start.date()!=end.date():return False
-    if start.time()<time(8) or end.time()>time(22) or start.minute%GRID_MINUTES or start.second or start.microsecond:return False
+    if not week<=start.date()<week+timedelta(days=WINDOW_DAYS) or end>datetime.combine(week+timedelta(days=WINDOW_DAYS),time.min,SHANGHAI):return False
+    if not valid_task_interval(start,end):return False
     minutes=(end-start).total_seconds()/60
     if end>dt(task['deadline']) or minutes<=0 or minutes%GRID_MINUTES:return False
     if not fragment and minutes!=task['duration_minutes']:return False
@@ -210,10 +214,11 @@ def score(items,tasks,old,week,preferences=None,strategy='balanced',workload=Non
         preference_map=preferences.get('task_windows') or {}
         personal=(preference_map.get(category) or [])+(preference_map.get('*') or [])
         preference_capacity+=WEIGHTS[t['priority']]*(bool(preference or personal)+bool((preferences.get('avoid_windows') or [])+(preferences.get('avoid_windows_by_category',{}).get(category,[]) or []))+bool(preferences.get('temporary_avoid_windows')))
-        matches=all(any(dt(w['start_at'])<=a and b<=dt(w['end_at']) for w in preference) if preference else any(a.hour*60+a.minute>=_clock(w['start']) and b.hour*60+b.minute<=_clock(w['end']) and (not w.get('weekdays') or a.isoweekday() in w['weekdays']) for w in personal) for a,b in map(interval,segments))
+        matches=all(any(dt(w['start_at'])<=a and b<=dt(w['end_at']) for w in preference) if preference else any(_personal_window(a,w)[0]<=a and b<=_personal_window(a,w)[1] and (not w.get('weekdays') or a.isoweekday() in w['weekdays']) for w in personal) for a,b in map(interval,segments))
         if (preference or personal) and not matches:miss+=WEIGHTS[t['priority']]
         avoided_windows=(preferences.get('avoid_windows',[]) or [])+(preferences.get('avoid_windows_by_category',{}).get(category,[]) or [])
-        if any(a.hour*60+a.minute<_clock(w['end']) and _clock(w['start'])<b.hour*60+b.minute and (not w.get('weekdays') or a.isoweekday() in w['weekdays']) for a,b in map(interval,segments) for w in avoided_windows):avoid+=WEIGHTS[t['priority']]
+        if any(overlaps(a,b,*_personal_window(day,w)) and (not w.get('weekdays') or day.isoweekday() in w['weekdays'])
+            for a,b in map(interval,segments) for day in (a,b-timedelta(microseconds=1)) for w in avoided_windows):avoid+=WEIGHTS[t['priority']]
         if any(overlaps(a,b,dt(w['start_at']),dt(w['end_at'])) for a,b in map(interval,segments) for w in preferences.get('temporary_avoid_windows',[])):temporary_avoid+=WEIGHTS[t['priority']]
         desired=float((preferences.get('deadline_buffer_by_category',{}).get(category)
                        if category in preferences.get('deadline_buffer_by_category',{})
@@ -239,6 +244,11 @@ def score(items,tasks,old,week,preferences=None,strategy='balanced',workload=Non
 def _clock(value):
     hour,minute=map(int,value.split(':')[:2])
     return hour*60+minute
+
+
+def _personal_window(day, window):
+    midnight=datetime.combine(day.date(),time.min,SHANGHAI)
+    return tuple(midnight+timedelta(minutes=_clock(window[key])) for key in ('start','end'))
 
 
 def _schedule_key(items):
@@ -268,7 +278,7 @@ def _split_options(task,starts,week,now,busy,old,preferences,strategy):
         if allowed(task,start,end,week,now,busy,old,True):cells.append((start,end))
     spans=[]
     for a,b in sorted(set(cells)):
-        if spans and spans[-1][1]==a:spans[-1]=(spans[-1][0],b)
+        if spans and spans[-1][1]==a and spans[-1][0].date()==a.date():spans[-1]=(spans[-1][0],b)
         else:spans.append((a,b))
     requested=p.get('segment_count')
     minimum=p.get('min_block_minutes',30)
@@ -342,7 +352,7 @@ def _arrange_single(week,now,tasks,rules,previous,allow_alternatives=True,prefer
             if overlaps(a,b,c,d):
                 diagnostics.append(dict(ref=left['ref'],code='FIXED_TASK_CONFLICT',message=f"{left['title']}与{right['title']}的指定开始时间冲突；需要先修改其中一项的时间要求。"))
     if diagnostics:return dict(status='conflict',items=[],alternatives=[],diagnostics=diagnostics)
-    starts=[datetime.combine(week+timedelta(days=d),time(8),SHANGHAI)+timedelta(minutes=GRID_MINUTES*s) for d in range(WINDOW_DAYS) for s in range(840//GRID_MINUTES)]
+    starts=[datetime.combine(week+timedelta(days=d),time.min,SHANGHAI)+timedelta(minutes=GRID_MINUTES*s) for d in range(WINDOW_DAYS) for s in range(DAY_MINUTES//GRID_MINUTES)]
     starts=[s for s in starts if s>=now]
     for t in tasks:
         before=old.get(t['ref'],[]); p=t.get('profile') or {}
@@ -350,7 +360,12 @@ def _arrange_single(week,now,tasks,rules,previous,allow_alternatives=True,prefer
         if frozen:
             candidates=[before] if before and not validate_assistant(week,now,[t],rules,before,before) else []
         else:
-            candidates=[] if (p.get('segment_count') or 1)>1 else [[item_for(t,start)] for start in starts if t['duration_minutes']<=840 and allowed(t,start,start+timedelta(minutes=t['duration_minutes']),week,now,busy,old)]
+            # Ordinary automatic suggestions fit a calendar day; a user-specified
+            # clock may cross midnight. This avoids rewarding midnight merely
+            # because the daily workload counters reset there.
+            candidates=[] if (p.get('segment_count') or 1)>1 else [[item_for(t,start)] for start in starts if t['duration_minutes']<=DAY_MINUTES
+                and (p.get('fixed_start') or start+timedelta(minutes=t['duration_minutes'])<=datetime.combine(start.date()+timedelta(days=1),time.min,SHANGHAI))
+                and allowed(t,start,start+timedelta(minutes=t['duration_minutes']),week,now,busy,old)]
             if not candidates:candidates+=_split_options(t,starts,week,now,busy,old,preferences,strategy)
         candidates.sort(key=lambda pack:(len(pack),score(pack,by_ref,old,week,preferences,strategy,workload)))
         choices[t['ref']]=candidates

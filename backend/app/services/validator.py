@@ -1,4 +1,4 @@
-from .grid import GRID_MINUTES
+from .grid import GRID_MINUTES, DAY_MINUTES
 """Check assignments directly, independently of the placement algorithm.
 
 The scheduler reuses only the input checks and TimeRule expansion, then asks
@@ -176,8 +176,8 @@ def validate_schedule(
                 violations.append(Violation("DEADLINE_VIOLATION", "Assignment ends after the task deadline.", (task_id,)))
         if start < week_start_at or start >= week_end_at or end > week_end_at:
             violations.append(Violation("OUTSIDE_WEEK", "Assignment must be inside the selected Shanghai week.", (task_id,)))
-        if start.date() != end.date() or start.time() < time(8) or end.time() > time(22):
-            violations.append(Violation("OUTSIDE_WORKING_HOURS", "Assignment must fit on one day within 08:00-22:00.", (task_id,)))
+        if (end-start).total_seconds() > DAY_MINUTES*60:
+            violations.append(Violation("OUTSIDE_WORKING_HOURS", "One continuous assignment must not exceed 24 hours.", (task_id,)))
         if start.minute % GRID_MINUTES or start.second or start.microsecond:
             violations.append(Violation("OFF_GRID", "Task start must be on the local 5-minute grid.", (task_id,)))
         for rule in rules:

@@ -126,7 +126,7 @@ export default function DayFlowWorkspace({workspace,today,active,refreshVersion,
  useEffect(()=>{if(!active&&editing){setEditing(null);restoreEvents()}},[active])
  const jump=date=>{calendar.selectDate(navigationDate(date));setDay(date);setMiniDate(date);setRange(calendarRange(date,view));setSidebar(false)}
  const closeEditor=()=>{setEditing(null);restoreEvents()}
- const create=event=>{if(!data||latest.current.editing)return;setEditing({fields:{event_id:null,title:'',description:'',all_day:false,blocks_time:true,start:day+'T09:00',end:day+'T10:00'},revision:data.revision,anchor:event.currentTarget.getBoundingClientRect()})}
+ const create=event=>{if(!data||latest.current.editing)return;setEditing({fields:{event_id:null,title:'',description:'',all_day:false,blocks_time:true,start:day+'T08:00',end:day+'T09:00'},revision:data.revision,anchor:event.currentTarget.getBoundingClientRect()})}
  const changeView=next=>{calendar.changeView(next);setView(next);setRange(calendarRange(day,next))}
  const moveMonth=delta=>{const d=new Date(miniDate.slice(0,7)+'-01T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+delta);setMiniDate(d.toISOString().slice(0,10))}
  const cells=miniMonth(miniDate)

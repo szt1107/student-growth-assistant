@@ -1,4 +1,4 @@
-from .grid import GRID_MINUTES
+from .grid import GRID_MINUTES, DAY_MINUTES
 """Deterministic earliest-slot heuristic on a bounded local 5-minute grid."""
 
 from collections.abc import Sequence
@@ -42,16 +42,16 @@ def schedule_week(
 
     for task in ordered_tasks:
         chosen = None
-        # Even very large valid durations cannot fit in a 14-hour day; avoid
+        # Even very large valid durations cannot fit in a 24-hour interval; avoid
         # constructing an overflowing timedelta or trying to split the task.
-        if task.duration_minutes <= 14 * 60:
+        if task.duration_minutes <= DAY_MINUTES:
             duration = timedelta(minutes=task.duration_minutes)
             deadline = task.deadline.astimezone(SHANGHAI)
             for day_offset in range(7):
                 day = week_start + timedelta(days=day_offset)
-                opens = datetime.combine(day, time(8), SHANGHAI)
-                closes = datetime.combine(day, time(22), SHANGHAI)
-                for grid_step in range(840 // GRID_MINUTES):
+                opens = datetime.combine(day, time.min, SHANGHAI)
+                closes = datetime.combine(week_start+timedelta(days=7), time.min, SHANGHAI)
+                for grid_step in (*range(8*60//GRID_MINUTES,DAY_MINUTES//GRID_MINUTES), *range(8*60//GRID_MINUTES)):
                     start = opens + timedelta(minutes=GRID_MINUTES * grid_step)
                     end = start + duration
                     if end > closes or end > deadline:

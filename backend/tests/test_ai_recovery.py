@@ -120,7 +120,7 @@ def test_real_protocol_failure_or_query_loop_still_persists_editable_draft(clien
     assert 'test-secret' not in caplog.text and '操作系统作业' not in caplog.text
 
 
-@pytest.mark.parametrize('now,has_items',[('2026-10-14T19:10:00+08:00',True),('2026-10-14T21:10:00+08:00',False)])
+@pytest.mark.parametrize('now,has_items',[('2026-10-14T19:10:00+08:00',True),('2026-10-14T21:10:00+08:00',True),('2026-10-14T23:10:00+08:00',False)])
 def test_late_evening_uses_real_validator_and_never_changes_date(client,wire,monkeypatch,now,has_items):
     clock=lambda:datetime.fromisoformat(now)
     for module in (assistant_clock,conversation_tools,conversation_context):monkeypatch.setattr(module,'assistant_now',clock)
