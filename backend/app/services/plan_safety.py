@@ -68,12 +68,12 @@ def prepare_plan_rules(
     next_id = max((rule.id for rule in rules), default=0) + 1
     for offset in range(7):
         day = week_start + timedelta(days=offset)
-        opens = datetime.combine(day, time(8), SHANGHAI)
-        end = min(now, datetime.combine(day, time(22), SHANGHAI))
+        opens = datetime.combine(day, time.min, SHANGHAI)
+        end = min(now, opens+timedelta(days=1))
         if end > opens:
             rules.append(TimeRuleInput(
                 id=next_id, kind="protected", title="已过去的时间", recurrence="once",
-                date=day, start_time=time(8), end_time=end.time().replace(tzinfo=None),
+                date=day, start_time=time.min, end_time=time.max if end.date()>day else end.time().replace(tzinfo=None),
             ))
             next_id += 1
     return rules

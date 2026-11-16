@@ -1,0 +1,404 @@
+/* 美化版 · visual layer only. All existing controls and behavior are retained. */
+:root {
+  --sga-background: #fbfaf6;
+  --sga-surface: #fffefa;
+  --sga-foreground: #2c4037;
+  --sga-primary: #315f4d;
+  --sga-selected: #e1eadc;
+  --sga-muted: #f0f3e9;
+  --sga-border: #e1e5da;
+  --sga-navigation: #eef1e7;
+  --sga-conversations: #f5f5ee;
+  --beauty-muted: #637166;
+  --beauty-shadow: 0 4px 24px #334d3510;
+  --beauty-serif: "Palatino Linotype", "Songti SC", "STSong", "SimSun", serif;
+  --ink: var(--sga-foreground);
+  --muted: var(--beauty-muted);
+  --line: var(--sga-border);
+  --accent: var(--sga-primary);
+  --soft: var(--sga-muted);
+  --surface: var(--sga-surface);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body { background: var(--sga-background); }
+::selection { background: #dce8cc; color: #243e31; }
+
+.compact-shell.v2-shell {
+  --ink: var(--sga-foreground);
+  --muted: var(--beauty-muted);
+  --line: var(--sga-border);
+  --accent: var(--sga-primary);
+  --soft: var(--sga-muted);
+  --surface: var(--sga-surface);
+  --ui-ink: var(--sga-foreground);
+  --ui-muted: var(--beauty-muted);
+  --ui-accent: var(--sga-primary);
+  --ui-line: var(--sga-border);
+  --ui-panel: var(--sga-surface);
+  background: var(--sga-background);
+  font-size: 15px;
+}
+
+/* Keep the original grid tracks: the divider's pointer math depends on them. */
+.compact-shell.v2-shell .v2-grid { background: var(--sga-background); }
+.compact-shell.v2-shell .v2-navigation {
+  background: var(--sga-navigation);
+  border-color: #dce3d4;
+  gap: 12px;
+}
+.compact-shell.v2-shell .v2-navigation .v2-nav-icon {
+  border-radius: 13px;
+  color: #667466;
+  transition: background 160ms, color 160ms, box-shadow 160ms;
+}
+.compact-shell.v2-shell .v2-navigation .v2-nav-icon[aria-current] {
+  color: #294f3c;
+  background: #dce6d2;
+  box-shadow: inset 0 0 0 1px #cfdcc4, 0 3px 8px #39523109;
+}
+.compact-shell.v2-shell .v2-navigation .v2-nav-icon:hover { background: #e2e9d9; }
+.compact-shell.v2-shell .v2-navigation .v2-brand-label {
+  color: #34553f;
+  font-family: var(--beauty-serif);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: .1em;
+}
+.compact-shell.v2-shell .v2-conversations {
+  background: var(--sga-conversations);
+  border-color: var(--sga-border);
+  padding-top: 18px;
+}
+.compact-shell.v2-shell .conversation-list { gap: 14px; }
+.compact-shell.v2-shell .conversation-new.sga-button {
+  border: 1px solid #d7e0cd;
+  background: #e8eedf;
+  color: #31573f;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px #36473104;
+}
+.compact-shell.v2-shell .conversation-search {
+  background: #fffefa;
+  border-color: #dfe4d7;
+  border-radius: 12px;
+}
+.compact-shell.v2-shell .conversation-row { border-radius: 10px; }
+.compact-shell.v2-shell .conversation-row:hover,
+.compact-shell.v2-shell .conversation-row[data-selected] { background: #e7eddf; }
+.compact-shell.v2-shell .conversation-filters [aria-pressed=true] {
+  background: #e0e8d7;
+  color: #31523e;
+}
+.compact-shell.v2-shell .v2-topbar {
+  background: var(--sga-background);
+  border-color: #e7eadf;
+}
+.compact-shell.v2-shell .workspace-clock {
+  color: #5e6e60;
+  background: #f0f2e8;
+  border: 1px solid #e2e6d8;
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+/* Illustration is decorative CSS: no extra action, prompt or data request. */
+.compact-shell.v2-shell .v2-chat,
+.compact-shell.v2-shell .conversation-chat.aui-thread,
+.compact-shell.v2-shell .aui-thread,
+.compact-shell.v2-shell .aui-footer {
+  background: var(--sga-background);
+}
+.compact-shell.v2-shell .aui-thread[data-empty=true] .aui-footer {
+  gap: 24px;
+  padding-bottom: clamp(20px, 7vh, 72px);
+}
+.compact-shell.v2-shell .aui-welcome {
+  margin-bottom: 4px;
+  isolation: isolate;
+}
+.compact-shell.v2-shell .aui-welcome::before {
+  content: "";
+  display: block;
+  width: min(390px, 80%);
+  height: clamp(150px, 25vh, 230px);
+  margin: 0 auto 26px;
+  background: url('/images/study-garden.png') center / contain no-repeat;
+  pointer-events: none;
+}
+.compact-shell.v2-shell .aui-welcome h3 {
+  font-family: var(--beauty-serif);
+  font-size: clamp(28px, 2.6vw, 38px);
+  font-weight: 500;
+  letter-spacing: .14em;
+  color: #344c39;
+  line-height: 1.5;
+}
+.compact-shell.v2-shell .aui-composer {
+  border: 1px solid #d8dfd0;
+  border-radius: 24px;
+  background: #fffefa;
+  padding: 18px 18px 12px;
+  box-shadow: 0 10px 36px #3e503011, 0 2px 6px #3e503005;
+  transition: border-color 160ms, box-shadow 160ms;
+}
+.compact-shell.v2-shell .aui-composer:focus-within {
+  border-color: #8ba380;
+  box-shadow: 0 0 0 3px #e7eddf, 0 10px 32px #3e50300a;
+}
+.compact-shell.v2-shell .aui-composer textarea { color: #34463a; line-height: 26px; }
+.compact-shell.v2-shell .aui-composer textarea::placeholder { color: #778171; }
+.compact-shell.v2-shell .aui-send {
+  background: #315f4d;
+  color: #fff;
+  box-shadow: 0 3px 10px #315f4d1c;
+}
+.compact-shell.v2-shell .aui-send:disabled {
+  background: #dce5d4;
+  color: #63775c;
+  opacity: .72;
+  box-shadow: none;
+}
+.compact-shell.v2-shell .aui-mic,
+.compact-shell.v2-shell .composer-modes .composer-add { background: #f0f2e8; color: #5e735b; }
+.compact-shell.v2-shell .aui-send,
+.compact-shell.v2-shell .aui-mic,
+.compact-shell.v2-shell .composer-modes .composer-add { border-radius: 50%; }
+.compact-shell.v2-shell .aui-thread .workspace-message.user {
+  background: #eaf0e1;
+  border: 1px solid #dfe7d5;
+  border-radius: 19px 19px 5px 19px;
+  color: #30462f;
+}
+.compact-shell.v2-shell .aui-thread .workspace-message.assistant { color: #334139; }
+.compact-shell.v2-shell .aui-thread .safe-message a { color: #315f4d; text-underline-offset: 3px; }
+.compact-shell.v2-shell .aui-thread .safe-message pre { background: #f0f1e8; border-color: #dfe4d5; }
+.compact-shell.v2-shell .v2-workspace-heading {
+  background: #f4f5ed;
+  border-color: #e1e5d9;
+}
+.compact-shell.v2-shell .v2-tool-page[data-placement=auxiliary] { background: #f8f9f2; }
+.compact-shell.v2-shell .v2-workspace-tabs .sga-button[aria-selected=true] {
+  background: #e0e8d6;
+  color: #31533e;
+  border-radius: 10px;
+}
+
+/* The same controls, with consistent edges, focus rings and surface depth. */
+.sga-button { border-radius: 10px; transition: background 150ms, border-color 150ms, box-shadow 150ms, color 150ms; }
+.sga-button[data-variant=default]:not(.aui-send) {
+  background: var(--sga-primary);
+  color: #fff;
+  box-shadow: 0 3px 9px #315f4d12;
+}
+.sga-button[data-variant=default]:not(.aui-send):hover:not(:disabled) { background: #264d3d; }
+.sga-button[data-variant=outline] { border-color: #d7dfce; background: #fffefa; }
+.sga-button[data-variant=outline]:hover:not(:disabled) { background: #f0f4e8; }
+.sga-input:not([type=checkbox]):not([type=radio]), .sga-textarea, .sga-select {
+  border-color: #dbe1d3;
+  border-radius: 10px;
+  background-color: #fffefa;
+  color: var(--sga-foreground);
+  box-shadow: 0 1px 2px #35492e04;
+  transition: border-color 150ms, box-shadow 150ms;
+}
+.sga-input:not([type=checkbox]):not([type=radio]):focus-visible,
+.sga-textarea:focus-visible, .sga-select:focus-visible {
+  border-color: #849f78;
+  outline: 2px solid #d3e0c8;
+  outline-offset: 2px;
+}
+.compact-shell.v2-shell .aui-composer .sga-textarea {
+  border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none;
+}
+.compact-shell.v2-shell .conversation-search .sga-input {
+  border: 0; background: transparent; border-radius: 0; box-shadow: none;
+}
+[data-slot=tabs-list] { background: #edf0e6; border-radius: 12px; padding: 4px; }
+[data-slot=tabs-trigger][data-state=active] {
+  background: #fffefa;
+  color: #31553e;
+  box-shadow: 0 2px 7px #3b4e3010, inset 0 0 0 1px #e0e5d8;
+}
+[data-slot=dialog-content], [data-slot=alert-dialog-content],
+[data-slot=dropdown-menu-content], [data-slot=popover-content], .composer-mode-menu {
+  border-color: #dce2d3;
+  background: #fffefa;
+  box-shadow: 0 18px 60px #30412f22, 0 3px 12px #30412f0a;
+}
+[data-slot=dialog-overlay], [data-slot=alert-dialog-overlay] {
+  background: #24342566;
+  backdrop-filter: blur(3px);
+}
+.compact-shell.v2-shell :focus-visible { outline-color: #527d55; }
+
+/* Calendar geometry, event colors and available views are unchanged. */
+.compact-shell.v2-shell .dayflow-workspace:not([data-compact]) {
+  border: 1px solid #e0e5d8;
+  border-radius: 20px;
+  background: #fffefa;
+  box-shadow: var(--beauty-shadow);
+}
+.compact-shell.v2-shell .dayflow-workspace .dayflow-toolbar {
+  background: #fffefa;
+  border-bottom-color: #e3e7dc;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+.compact-shell.v2-shell .dayflow-workspace .dayflow-period strong {
+  color: #344b38;
+  font-family: var(--beauty-serif);
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.compact-shell.v2-shell .dayflow-workspace .dayflow-views { background: #edf1e6; border-radius: 12px; }
+.compact-shell.v2-shell .dayflow-workspace .dayflow-views [aria-pressed=true] {
+  background: #fffefa;
+  color: #31573f;
+  box-shadow: 0 2px 6px #33472c10;
+}
+.compact-shell.v2-shell .dayflow-workspace .dayflow-sidebar {
+  background: #f5f6ee;
+  border-color: #e2e6da;
+}
+.compact-shell.v2-shell .dayflow-workspace .dayflow-groups h3 { color: #5c6d56; }
+.compact-shell.v2-shell .dayflow-workspace .df-calendar-container {
+  --df-color-primary: #315f4d;
+  --df-color-border: #e7eade;
+  --df-color-hover: #f0f3e8;
+}
+.compact-shell.v2-shell .dayflow-mini button[aria-pressed=true] { background: #315f4d; color: #fff; }
+.dayflow-inline-editor { border-color: #dce2d3; border-radius: 16px; background: #fffefa; }
+
+/* Decorative headers stay separate from functional content. */
+.compact-shell.v2-shell .review-page-heading,
+.compact-shell.v2-shell .profile-intro {
+  min-height: 104px;
+  box-sizing: border-box;
+  margin: 0 0 22px;
+  padding: 25px 28px;
+  border: 1px solid #e2e5d7;
+  border-radius: 18px;
+  background-color: #f0f2e6;
+}
+.compact-shell.v2-shell .review-page-heading {
+  background-image: url('/images/review-landscape.svg');
+  background-position: right 88px center;
+  background-size: 190px 102px;
+  background-repeat: no-repeat;
+}
+.compact-shell.v2-shell .profile-intro {
+  background-image: url('/images/growth-garden.svg');
+  background-position: right 26px center;
+  background-size: 160px 102px;
+  background-repeat: no-repeat;
+}
+.compact-shell.v2-shell .review-page-heading h2,
+.compact-shell.v2-shell .profile-intro h2 {
+  font-family: var(--beauty-serif);
+  font-size: 29px;
+  font-weight: 600;
+  color: #334d36;
+  letter-spacing: .08em;
+  margin: 0;
+}
+.compact-shell.v2-shell .review-range-toolbar { padding: 4px 0 14px; }
+.compact-shell.v2-shell .review-range-caption { color: #687260; margin-bottom: 20px; }
+.compact-shell.v2-shell .review-dashboard .review-kpi {
+  border-radius: 16px;
+  border-color: #dfe5d7;
+  background: #fffefa;
+  padding: 20px;
+  box-shadow: 0 3px 15px #3c4e2e06;
+}
+.compact-shell.v2-shell .review-dashboard .review-kpi:nth-child(2) { background: #fbf7ee; border-color: #e9e2d3; }
+.compact-shell.v2-shell .review-dashboard .review-kpi:nth-child(3) { background: #f5f3ed; border-color: #e5e1d7; }
+.compact-shell.v2-shell .review-dashboard .review-kpi[aria-pressed=true] {
+  background: #edf3e6;
+  border-color: #91ac80;
+  box-shadow: 0 0 0 1px #dbe6ce;
+}
+.compact-shell.v2-shell .review-dashboard .review-kpi strong { color: #344b36; font-weight: 600; font-size: 32px; }
+.compact-shell.v2-shell .review-data-card {
+  border-color: #e1e6d9;
+  border-radius: 18px;
+  background: #fffefa;
+  box-shadow: 0 4px 18px #334c2b05;
+}
+.compact-shell.v2-shell .review-card-icon { background: #eaf0df; color: #57754c; border-radius: 11px; }
+.compact-shell.v2-shell .review-empty-chart { background: #fafbf5; border-radius: 14px; margin-top: 8px; }
+.compact-shell.v2-shell .review-empty-chart strong { color: #53634c; }
+.compact-shell.v2-shell .review-source-table thead th { background: #f0f3e8; }
+.compact-shell.v2-shell .review-source-table tbody tr:hover { background: #f7f9f0; }
+.compact-shell.v2-shell .review-status-filter .sga-button[aria-pressed=true] { background: #e2ead6; color: #34553c; }
+.compact-shell.v2-shell .profile-toolbar { border-color: #e1e5d7; padding-bottom: 18px; }
+.compact-shell.v2-shell .profile-page .goal-list,
+.compact-shell.v2-shell .profile-page .preference-rule-list { gap: 12px; }
+.compact-shell.v2-shell .profile-page .goal-card,
+.compact-shell.v2-shell .profile-page .preference-rule-card,
+.compact-shell.v2-shell .profile-page .memory-card {
+  padding: 22px;
+  border: 1px solid #e0e5d7;
+  border-radius: 16px;
+  background: #fffefa;
+  box-shadow: 0 3px 14px #34452f05;
+}
+.compact-shell.v2-shell .profile-page .growth-form {
+  border: 1px solid #dde5d2;
+  background: #f7f9f0;
+  border-radius: 16px;
+}
+.compact-shell.v2-shell .profile-management > .growth-section { background: #fffefa; border-color: #e0e5d7; border-radius: 14px; }
+.compact-shell.v2-shell .workspace-draft {
+  border: 1px solid #d9bf8c;
+  background: #fffbf1;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px #8d71380b;
+}
+.compact-shell.v2-shell .workspace-confirmed { border-color: #b9cda8; background: #f0f6e8; border-radius: 16px; }
+
+@media (max-width: 1023px) {
+  .compact-shell.v2-shell .v2-navigation { background: #f0f3e9; border-color: #dfe5d6; gap: 0; }
+  .compact-shell.v2-shell .v2-navigation .v2-nav-icon { border-radius: 13px; }
+  .compact-shell.v2-shell .v2-mobile-switch { background: #fbfaf6; border-color: #e5e8db; }
+  .compact-shell.v2-shell .v2-mobile-switch [aria-checked=true],
+  .compact-shell.v2-shell .v2-mobile-switch [aria-pressed=true] { background: #dfe8d4; color: #31543d; border-radius: 10px; }
+  .compact-shell.v2-shell .aui-thread[data-empty=true] .aui-footer { gap: 22px; padding-bottom: 6vh; }
+  .compact-shell.v2-shell .aui-welcome::before { height: clamp(130px, 23vh, 195px); width: min(340px, 90%); margin-bottom: 20px; }
+  .compact-shell.v2-shell .aui-composer { padding: 16px 14px 10px; border-radius: 22px; }
+  .compact-shell.v2-shell .review-page-heading,
+  .compact-shell.v2-shell .profile-intro { min-height: 96px; padding: 20px; }
+  .compact-shell.v2-shell .review-page-heading { background-size: 120px 80px; background-position: right 80px center; }
+  .compact-shell.v2-shell .profile-intro { background-size: 128px 86px; background-position: right 16px center; }
+}
+@media (max-width: 600px) {
+  .compact-shell.v2-shell .v2-topbar { padding-left: 16px; padding-right: 12px; }
+  .compact-shell.v2-shell .aui-welcome h3 { font-size: 29px; letter-spacing: .1em; }
+  .compact-shell.v2-shell .review-page-heading,
+  .compact-shell.v2-shell .profile-intro { min-height: 90px; padding: 18px; margin-bottom: 18px; border-radius: 16px; }
+  .compact-shell.v2-shell .review-page-heading { background-image: none; }
+  .compact-shell.v2-shell .profile-intro { background-size: 106px 78px; background-position: right 12px center; }
+  .compact-shell.v2-shell .review-page-heading h2,
+  .compact-shell.v2-shell .profile-intro h2 { font-size: 25px; }
+  .compact-shell.v2-shell .review-dashboard .review-kpi { padding: 15px 13px; border-radius: 13px; }
+  .compact-shell.v2-shell .review-dashboard .review-kpi strong { font-size: 28px; }
+  .compact-shell.v2-shell .review-data-card { padding: 18px 16px; border-radius: 15px; }
+  .compact-shell.v2-shell .profile-page .goal-card,
+  .compact-shell.v2-shell .profile-page .preference-rule-card,
+  .compact-shell.v2-shell .profile-page .memory-card { padding: 16px; }
+  .compact-shell.v2-shell .dayflow-workspace .dayflow-toolbar { padding-top: 12px; padding-bottom: 12px; }
+  .compact-shell.v2-shell .dayflow-workspace .dayflow-period strong { font-size: 18px; }
+  .compact-shell.v2-shell .dayflow-workspace:not([data-compact]) { border-radius: 16px; }
+}
+@media (max-height: 640px) {
+  .compact-shell.v2-shell .aui-welcome::before { height: 100px; margin-bottom: 12px; }
+  .compact-shell.v2-shell .aui-thread[data-empty=true] .aui-footer { padding-bottom: 16px; gap: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sga-button, .sga-input, .sga-textarea, .sga-select,
+  .compact-shell.v2-shell .aui-composer,
+  .compact-shell.v2-shell .v2-navigation .v2-nav-icon { transition: none; }
+}

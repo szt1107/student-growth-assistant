@@ -204,7 +204,7 @@ def test_cross_day_utc_deadline_and_weekly_course_expand_once(client,test_engine
         p=Plan(week_start=friday.date()-timedelta(days=4),status='confirmed',source_revision=0,task_ids=[]);db.add(p);db.flush()
         db.add(PlanItem(plan_id=p.id,kind='course',time_rule_id=r.json()['id'],title_snapshot='周五课程',start_at=friday.replace(hour=14),end_at=friday.replace(hour=15)));db.commit()
     row=attention_for(client,tid)
-    assert row['free_minutes']==600 and row['available_start_count']==87
+    assert row['free_minutes']==1200 and row['available_start_count']==218
     assert row['window_end']=='2026-10-24T10:00:00+08:00'
 
 

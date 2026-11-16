@@ -10,22 +10,24 @@ from ..workspace_schemas import SchedulePreview, DRAFT_DEFAULTS
 from .assistant_clock import SHANGHAI
 
 DEFAULTS = DRAFT_DEFAULTS
-STARTS = {'早上': '09:00', '明早': '09:00', '上午': '09:00', '中午': '12:00', '下午': '14:00',
+STARTS = {'凌晨': '00:00', '早晨': '08:00', '早上': '08:00', '明早': '08:00', '上午': '08:00', '中午': '12:00', '下午': '14:00',
     '晚上': '19:00', '今晚': '19:00', '明晚': '19:00'}
 TIME_PERIODS = {
-    'morning': ('08:00', '12:00', '上午'),
+    'dawn': ('00:00', '06:00', '凌晨'),
+    'morning': ('06:00', '12:00', '上午'),
     'noon': ('12:00', '14:00', '中午'),
     'afternoon': ('14:00', '18:00', '下午'),
-    'evening': ('18:00', '22:00', '晚上'),
+    'evening': ('18:00', '24:00', '晚上'),
 }
-START_PERIODS = {'09:00': 'morning', '12:00': 'noon', '14:00': 'afternoon', '19:00': 'evening'}
+START_PERIODS = {'00:00': 'dawn', '08:00': 'morning', '12:00': 'noon', '14:00': 'afternoon', '19:00': 'evening'}
 NUMBER = r'(?:\d+(?:\.\d+)?|[零一二两三四五六七八九十百]+)'
 
 
 def day_window(day, period=None):
-    begin, end, _ = TIME_PERIODS.get(period, ('08:00', '22:00', '全天'))
-    return (datetime.combine(day, time.fromisoformat(begin), SHANGHAI),
-        datetime.combine(day, time.fromisoformat(end), SHANGHAI))
+    begin, end, _ = TIME_PERIODS.get(period, ('00:00', '24:00', '全天'))
+    start = datetime.combine(day, time.fromisoformat(begin), SHANGHAI)
+    finish = datetime.combine(day, time.min, SHANGHAI) + timedelta(days=1) if end == '24:00' else datetime.combine(day, time.fromisoformat(end), SHANGHAI)
+    return start, finish
 
 
 def number(text):
@@ -39,6 +41,7 @@ def number(text):
 
 
 def duration(text):
+    text = text.replace('半个小时', '半小时')
     text = re.sub(r'(休息|每段)\s*'+NUMBER+r'\s*分钟', '', text)
     match = re.search('('+NUMBER+r')(?:个)?半小时', text)
     if match and number(match[1]) is not None:return int((number(match[1])+.5)*60)
@@ -52,19 +55,22 @@ def duration(text):
 def clock(text):
     # An adjacent YYYY-MM-DD must not merge its day with the hour (2822:00).
     text = re.sub(r'20\d{2}-\d{2}-\d{2}', '', text)
-    match = re.search(r'(?:(早上|上午|中午|下午|晚上|今晚|明晚)\s*)?('+NUMBER+r')(?:点|[:：])(?:(半)|('+NUMBER+r')(?:分)?)?', text)
+    match = re.search(r'(?:(凌晨|早晨|早上|上午|中午|下午|晚上|今晚|明晚|明早)\s*)?('+NUMBER+r')(?:点|[:：])(?:(半)|('+NUMBER+r')(?:分)?)?', text)
     if not match:return None
     hour = number(match[2]);minute = 30 if match[3] else number(match[4]) if match[4] else 0
     if hour is None or minute is None:return None
     if match[1] in ('下午','晚上','今晚','明晚') and hour<12:hour+=12
+    if match[1] == '凌晨' and hour == 12:hour = 0
     if 0<=hour<24 and 0<=minute<60:return f'{int(hour):02}:{int(minute):02}'
 
 
 def fixed_start_requested(text):
     if re.search(r'不用固定|不必固定|不需要固定|不固定|可以调整|允许调整|自动避开|时间灵活',text):
         return False
-    return bool(re.search(r'(必须|务必|一定要|只能|固定在?|准时|就定在|严格按).{0,8}'+NUMBER+r'(点|[:：])|'
-        r'(开始时间|起始时间).{0,6}(固定|不能改|不可调整)|时间不能改|不能改时间',text))
+    # A stated clock is authoritative unless the user explicitly makes it flexible.
+    if re.search(r'(?:大概|大约|尽量|最好|优先|建议).{0,5}'+NUMBER+r'(?:点|[:：])|(?:点(?:半|'+NUMBER+r'分?)?|[:：]\d{2})\s*左右',text):
+        return False
+    return True
 
 
 def calendar_day(text, now, reference=None):
@@ -123,17 +129,31 @@ def user_values(text, now, *, reference_day=None):
         at = clock(text)
         if at:values['start_time'] = at;values['start_exact']=fixed_start_requested(text)
     if re.search(r'可以调整|允许调整|自动避开|时间灵活|不固定',text):values['start_exact']=False
-    for title_text in re.split(r'[，,。；;\n]',text):
+    # A concrete clock overrides a broad period (e.g. morning at 05:30).
+    if 'start_exact' in values:values['time_period']=None
+    for title_text in re.split(r'[，,。；;\n]',execution):
+        title_text = title_text.replace('半个小时', '半小时')
         title_text = re.sub(r'(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]|(?:(?:20\d{2})年)?\d{1,2}月\d{1,2}[日号]?', '',title_text)
         title_text = re.sub(r'20\d{2}-\d{2}-\d{2}|'+NUMBER+r'(?:个)?半?小时|半小时|'+NUMBER+r'分钟', '',title_text)
-        title_text = re.sub(r'(?:早上|上午|中午|下午|晚上|今晚|明晚)?'+NUMBER+r'(?:点|[:：])(?:半|'+NUMBER+r'分?)?', '',title_text)
+        title_text = re.sub(r'(?:凌晨|早晨|早上|上午|中午|下午|晚上|今晚|明晚|明早)?'+NUMBER+r'(?:点|[:：])(?:半|'+NUMBER+r'分?)?', '',title_text)
         title_text = re.sub(r'(?:帮我|请)?(?:生成|创建|新建).{0,6}(?:草案|初稿)', '',title_text)
         # A colon after the task name introduces details, not a replacement name.
         title_text = re.sub(r'^(?:任务名称|任务|名称|标题)[：:]\s*','',title_text)
-        title_text = re.sub(r'^(?:我|请|你|帮我|今天|今晚|明天|明晚|明早|早上|晚上|上午|下午|要|想|打算|准备|计划|用来|用于|必须|务必|准时|固定|只能|开始|有个|有一个|需要|完成|写|安排一下|安排|排一下|排|创建|新建|把|将|给我|做|一下|\s|：|:)+', '',title_text)
+        title_text = re.sub(r'^(?:我|请|你|帮我|今天|今晚|明天|明晚|明早|早上|晚上|上午|下午|要|想|打算|准备|计划|用来|用于|必须|务必|准时|固定|只能|开始|有个|有一个|需要|完成|写|安排一下|安排|排一下|排|创建|新建|把|将|给我|进行|参加|出席|举办|组织|做|一下|\s|：|:)+', '',title_text)
+        title_text = re.split(r'预计|大概|大约|耗时|用时|持续|时长|请(?:你)?(?:帮我|给我)|帮我(?:安排|规划|生成)|开始|结束', title_text, maxsplit=1)[0]
         match = re.search(r'([\u4e00-\u9fffA-Za-z0-9 ]{0,60}?(?:作业|实验报告|报告|实验|论文|考试|复习|项目|阅读|笔记|早读|读书|健身|训练|跑步|锻炼|游泳|瑜伽|散步|[pP][pP][tT]))',title_text)
         if match:
             values['title'] = match[1].strip(' “”“');break
+        # Recover an explicitly named occasion without a whitelist of school tasks.
+        candidate = title_text.strip(' “”“「」\"：:《》')
+        candidate = re.sub(r'(?:预计|大概|大约|耗时|用时|持续|时长|开始|结束|左右)+$', '', candidate).strip()
+        controls = r'改成|改为|改到|提前|推迟|调整|分成|分为|每段|休息|优先级|截止|最晚|规划|草案|方案|允许|取消|固定|不用|不要|请'
+        generic = {'学习', '任务', '日程', '活动', '事情', '一下', '预计', '大概', '大约', '开始', '结束', '中间', '进行', '参加', '前完成', '前提交', '左右', '时间灵活'}
+        if (2 <= len(candidate) <= 60 and candidate not in generic
+                and re.search(r'[\u4e00-\u9fffA-Za-z]', candidate)
+                and not re.search(controls, candidate)
+                and not re.search(r'分钟|小时|^\d+$|^'+NUMBER+r'段$', candidate)):
+            values['title'] = candidate;break
     segment = re.search(r'(?:分成|分为|分)('+NUMBER+r')段',text)
     if segment and number(segment[1]) is not None:values['segments'] = int(number(segment[1]))
     if not segment and re.search(r'允许分段|可以分段|可分段|帮我分段|允许拆分',text):values['segments']=2
@@ -170,17 +190,19 @@ def constrain_actions(actions, text, now):
             title=fields.get('title')
             scoped='。'.join(part for part in re.split(r'[，,。；;\n]',text) if title and title in part)
         values=user_values(scoped,now)
-        if 'day' not in values:continue
-        day=datetime.fromisoformat(values['day']).date()
+        for key in ('title','duration_minutes','deadline','priority'):
+            if key in values:fields[key]=values[key]
+        if not any(key in values for key in ('day','start_time','time_period')):continue
+        day=datetime.fromisoformat(values.get('day',now.date().isoformat())).date()
         start=datetime.combine(day,time.fromisoformat(values.get('start_time','08:00')),SHANGHAI)
         begin,end=day_window(day,values.get('time_period'))
-        if values.get('start_exact'):begin=start
+        if values.get('start_exact'):
+            begin=start
+            end=max(end,start+timedelta(minutes=fields.get('duration_minutes',DEFAULTS['duration_minutes'])))
         profile=fields.setdefault('profile',{})
         profile.update(allowed_windows=[{'start_at':begin.isoformat(),'end_at':end.isoformat()}],
             preferred_windows=[{'start_at':max(begin,min(start,end-timedelta(minutes=5))).isoformat(),'end_at':end.isoformat()}],
             fixed_start=start.isoformat() if values.get('start_exact') else None)
-        for key in ('duration_minutes','deadline','priority'):
-            if key in values:fields[key]=values[key]
         if action['op']=='update' and 'deadline' not in values:
             fields.pop('deadline',None)
     return result
@@ -213,7 +235,7 @@ def schedule(request, now, *, base=None, sources=None, preferences=None):
         values['work_segments']=[]
     if not base and origins['start_time']=='system_default':
         weekday=datetime.fromisoformat(str(values['day'])).isoweekday()
-        begin,end,_=TIME_PERIODS.get(values.get('time_period'),('08:00','22:00','全天'))
+        begin,end,_=TIME_PERIODS.get(values.get('time_period'),('00:00','24:00','全天'))
         applicable=[w for w in windows if (not w.get('weekdays') or weekday in w['weekdays'])
             and begin<=w['start']<end and w['end']>begin and w['start']>=values['start_time']]
         if applicable:values['start_time']=applicable[0]['start'];origins['start_time']='confirmed_preference'

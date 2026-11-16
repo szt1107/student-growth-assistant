@@ -99,8 +99,8 @@ def test_invalid_plan_repaired_once_then_trusted_fallback(client,defaults_chat,m
     assert call(client,'/api/tasks')==[]
 
 
-def test_after_21_no_past_or_silent_tomorrow(client,defaults_chat,monkeypatch):
-    monkeypatch.setattr(assistant_clock,'assistant_now',lambda:datetime.fromisoformat('2026-10-14T21:01:00+08:00'))
+def test_after_23_no_past_or_silent_tomorrow(client,defaults_chat,monkeypatch):
+    monkeypatch.setattr(assistant_clock,'assistant_now',lambda:datetime.fromisoformat('2026-10-14T23:01:00+08:00'))
     # Modules normally import the function once; patch both trusted clock aliases.
     monkeypatch.setattr(conversation_tools,'assistant_now',assistant_clock.assistant_now)
     ref=ref_of(send(client,defaults_chat,'今晚安排操作系统作业，90分钟'))

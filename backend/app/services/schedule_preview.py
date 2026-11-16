@@ -15,6 +15,7 @@ from .planning_state import planning_transaction
 from .workspace_views import revision
 from .conversations import error
 from . import draft_defaults
+from .grid import valid_task_interval
 
 
 def record_guard(db,row):
@@ -30,7 +31,7 @@ def editable_schedule(db, row):
     """Recover legacy clock intent without rewriting the stored draft on reads."""
     value = dict(row.payload['preview_input'])
     policy = row.payload.get('start_policy_version', 0)
-    if policy >= 3 or row.status in ('applied', 'discarded'):
+    if policy >= 4 or row.status in ('applied', 'discarded'):
         return value
     key = row.payload.get('preview_edit_receipt', {}).get('key') or row.payload.get('preview_key', '')
     parts = key.split(':')
@@ -41,6 +42,13 @@ def editable_schedule(db, row):
             .order_by(AssistantMessage.id.desc()).limit(12)).all()
         for text in messages:
             parsed = draft_defaults.user_values(text, assistant_clock.assistant_now())
+            if policy < 4:
+                origins = row.payload.get('field_sources', {})
+                for field in ('title', 'duration_minutes'):
+                    if field in parsed and origins.get(field) in (None, 'system_default', 'unresolved', 'schedule_adjusted'):
+                        value[field] = parsed[field]
+                if 'start_time' in parsed and origins.get('start_time') in (None, 'system_default', 'schedule_adjusted'):
+                    value.update({field: parsed[field] for field in ('start_time', 'start_exact', 'time_period') if field in parsed})
             if policy < 2 and ('start_exact' in parsed or 'time_period' in parsed):
                 value['start_exact'] = parsed.get('start_exact', False)
             if parsed.get('time_period') and 'time_period' not in value:
@@ -65,14 +73,14 @@ def dated_rows(row):
         task=next((t for t in payload.get('tasks',[]) if t['ref']==action.get('target')),None)
         if not task or not task.get('title') or not task.get('deadline'):continue
         minutes=task.get('duration_minutes')
-        if not minutes or minutes%5 or not 5<=minutes<=840:continue
+        if not minutes or minutes%5 or not 5<=minutes<=1440:continue
         profile=task.get('profile') or {}
         windows=profile.get('allowed_windows') or []
         pinned=bool(len(windows)>1 and profile.get('segment_count')==len(windows) and
             profile.get('fixed_start') and dt(profile['fixed_start'])==dt(windows[0]['start_at']))
         if len(windows)!=1 and not pinned:continue
         begin=dt(windows[0]['start_at']);end=dt(windows[-1]['end_at'])
-        if begin.date()!=end.date() and not pinned:continue
+        if end<=begin:continue
         preferred=profile.get('preferred_windows') or windows
         start=dt(profile['fixed_start']) if profile.get('fixed_start') else dt(preferred[0]['start_at'])
         value=dict(title=task['title'],duration_minutes=task['duration_minutes'],deadline=task['deadline'],
@@ -133,6 +141,8 @@ def problems(db, row, status):
             suggestion='请明确选择新的开始时间，再保存草案重新计算。'))
         return result
     _, end = draft_defaults.day_window(value.day, value.time_period)
+    if value.start_exact and not value.time_period:
+        end=max(end,start+timedelta(minutes=value.duration_minutes+value.break_minutes*(value.segments-1)))
     deadline = value.deadline or end
     if value.task_id and not value.deadline:
         task = db.get(Task, value.task_id)
@@ -144,7 +154,7 @@ def problems(db, row, status):
             suggestion='如果要调整原任务，请先确认并修改“截止时间”；如果这是另一次活动，请说明新建任务。'))
         return result
     end = min(end, deadline)
-    earliest = max(start, now, datetime.combine(value.day, time(8), assistant_clock.SHANGHAI))
+    earliest = max(start, now, datetime.combine(value.day, time.min, assistant_clock.SHANGHAI))
     earliest += timedelta(seconds=(-earliest.timestamp()) % 300)
     rest = value.break_minutes * (value.segments - 1)
     required = value.duration_minutes + rest
@@ -156,7 +166,7 @@ def problems(db, row, status):
             suggestion='请提前“建议开始时间”、延后“截止时间”或改选日期；也可以按实际需要减少工作时长或段间休息。'))
         return result
     from .workspace_views import calendar_events
-    last_day=dt(value.work_segments[-1].end_at).date() if value.work_segments else value.day
+    last_day=dt(value.work_segments[-1].end_at).date() if value.work_segments else min(end,earliest+duration).date()
     calendar = calendar_events(db, value.day, last_day + timedelta(days=1))
     occupied = []
     for event in calendar['events']:
@@ -185,8 +195,8 @@ def problems(db, row, status):
         if value.work_segments:
             for index,window in enumerate(value.work_segments,1):
                 begin_at=dt(window.start_at);end_at=dt(window.end_at)
-                if begin_at.date()!=end_at.date() or begin_at.time()<time(8) or end_at.time()>time(22) or begin_at.minute%5 or begin_at.second:
-                    result.append(dict(code='INVALID_SEGMENT_TIME',message=f'第{index}段不符合每日08:00–22:00的5分钟安排网格。',
+                if not valid_task_interval(begin_at,end_at):
+                    result.append(dict(code='INVALID_SEGMENT_TIME',message=f'第{index}段不符合全天24小时的5分钟安排网格（单段最多24小时）。',
                         suggestion='请调整这一段的起止时间后保存。'))
                 if window.end_at>deadline:
                     result.append(dict(code='DEADLINE_VIOLATION',message=f'第{index}段结束时间晚于{deadline:%m月%d日 %H:%M}的截止时间。',
@@ -233,8 +243,10 @@ def calculate(db, session, value, sources, target):
     period_start,end=draft_defaults.day_window(value.day,value.time_period)
     if value.time_period and any(window.start_at<period_start or window.end_at>end for window in value.work_segments):
         error('INVALID_DRAFT','分段时间超出所选日期或时段，请先明确修改时段要求。',422)
-    # Never expand the original 08:00–22:00/grid constraints. Past suggested
-    # starts are advanced by the engine; the original preference stays visible.
+    # Explicit clocks stay fixed; only flexible suggestions may move.
+    # A fixed late-night occasion may finish after midnight.
+    if value.start_exact and not value.time_period:
+        end=max(end,start+timedelta(minutes=value.duration_minutes+value.break_minutes*(value.segments-1)))
     earliest=max(start,now)
     earliest=earliest.replace(second=0,microsecond=0)+timedelta(minutes=bool(earliest.second or earliest.microsecond))
     earliest+=timedelta(minutes=(-earliest.minute)%5)
@@ -261,7 +273,7 @@ def calculate(db, session, value, sources, target):
             fields['deadline']=max(end,value.work_segments[-1].end_at).isoformat()
     payload=build_proposal(db,week,[action],preferences=prefs,include_unplanned=False)
     payload['preview_input']=value.model_dump(mode='json')
-    payload['start_policy_version']=3
+    payload['start_policy_version']=4
     payload['field_sources']=dict(sources)
     payload['schedule_adjustments']=[]
     assigned=sorted((x for x in payload['items'] if x['ref']==target),key=lambda x:x['start_at'])

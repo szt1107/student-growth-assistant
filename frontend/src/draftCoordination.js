@@ -259,8 +259,8 @@ export function planningDraftPayload(draft, content) {
     if (!Number.isFinite(Date.parse(task.start_at)) || !Number.isFinite(Date.parse(task.end_at)) || Date.parse(task.end_at)<=Date.parse(task.start_at)) {
       throw Error('请填写完整的开始时间和结束时间，结束时间需要晚于开始时间。')
     }
-    if (!Number.isInteger(task.duration_minutes) || task.duration_minutes<5 || task.duration_minutes>840 || task.duration_minutes%5) {
-      throw Error('预计分钟须为5分钟的整数倍，范围为5至840分钟。')
+    if (!Number.isInteger(task.duration_minutes) || task.duration_minutes<5 || task.duration_minutes>1440 || task.duration_minutes%5) {
+      throw Error('预计分钟须为5分钟的整数倍，范围为5至1440分钟。')
     }
     if (task.duration_minutes<task.segments*5) throw Error('每段至少需要5分钟，请减少分段数。')
     if (task.work_segments.length) {

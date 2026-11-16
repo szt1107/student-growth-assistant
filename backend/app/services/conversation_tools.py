@@ -121,8 +121,8 @@ PLANNER='''当前是工具选择阶段，不是面向用户的回答阶段。自
 tasks/goals/memories使用lookup_schema的id/q/offset/limit；calendar/review使用start,end（上海日期，end不含）。日期工具优先按tool_schemas中的工具名查对应契约，不混用查询和草案字段。
 attention无参数，复用真实优先处理/空闲时段计算；time_rules使用lookup_schema查询课程和保护时间；task_execution使用lookup_schema，指定真实任务id读取反馈和计时状态，不带id查询当前活动计时。问先做什么先查attention；不能凭聊天猜优先级。课程规则不是普通记忆，profile_draft支持create_time_rule/update_time_rule。执行进度用feedback_draft，计时用其中work_timer。查询结果才能确定id时先读并continue_after_read=true，重名须询问，不猜id。
 planning_draft使用planning_schema；breakdown_draft使用breakdown_schema；review_draft使用review_schema。
-明确日期或星期必须按context.now换算为上海日期，并使用profile.allowed_windows限定在该日期。用户指定上午、中午、下午、晚上时，分别将允许窗口限定为08:00–12:00、12:00–14:00、14:00–18:00、18:00–22:00；schedule_preview使用time_period保留这一要求。9点、12点、14点、19点是各时段的默认建议起点，遇课程或正式占用后在同一时段内寻找完整空档。只有明确固定钟点才使用fixed_start或start_exact。指定时段放不下时返回具体原因，等待用户调整时段，不能自动换到晚上或另一天。preferred_windows用于允许窗口内的钟点偏好。不得因旧截止时间或旧安排换到另一天，不得自行延后已有截止时间。用户要求日期与真实截止时间矛盾时，保留两者并报告具体矛盾。只有用户明确要修改同一任务时才复用旧任务，不把同名的另一日活动自动当作旧任务修改。
-完整的新活动请求默认生成本次活动草案，同名旧任务不构成用户身份授权，不能继承其截止、锁定和时段限制。未给截止就留空，不虚构截止或要求用户修改无关旧任务。当前用户日期、开始时间和时长优先，无占用时采用原要求。有真实占用时让现有算法计算推荐时间，回复先说明具体占用，草案使用算法实际时间。
+明确日期或星期必须按context.now换算为上海日期，并使用profile.allowed_windows限定在该日期。用户指定上午、中午、下午、晚上时，分别将允许窗口限定为06:00–12:00、12:00–14:00、14:00–18:00、18:00–24:00；schedule_preview使用time_period保留这一要求。8点、12点、14点、19点是各时段的默认建议起点；未指定时间默认08:00，全天00:00–24:00均可安排，遇课程或正式占用后在同一时段内寻找完整空档。用户明确说几点开始就使用fixed_start或start_exact，不要求额外说“必须”；只有用户说左右、可以调整等才作为灵活建议。明确钟点优先于宽泛时段。指定时段放不下时返回具体原因，等待用户调整时段，不能自动换到晚上或另一天。preferred_windows用于允许窗口内的钟点偏好。不得因旧截止时间或旧安排换到另一天，不得自行延后已有截止时间。用户要求日期与真实截止时间矛盾时，保留两者并报告具体矛盾。只有用户明确要修改同一任务时才复用旧任务，不把同名的另一日活动自动当作旧任务修改。
+完整的新活动请求默认生成本次活动草案，同名旧任务不构成用户身份授权，不能继承其截止、锁定和时段限制。未给截止就留空，不虚构截止或要求用户修改无关旧任务。当前用户日期、开始时间和时长优先，无占用时采用原要求。指定钟点有真实占用时保留原时间并说明具体冲突，等待用户选择；不得静默改动。名称从用户描述的真实活动提取，不限于学习任务，例如“进行升旗仪式”命名为“升旗仪式”，“半个小时”为30分钟。
 profile_draft/feedback_draft使用operations，遵守business_operations。edit_draft只引用已协调的current_drafts及kind/id/version/content，保留用户其它编辑。
 split_draft使用split_schema，引用已协调的日程草案id/version/content与目标target，先在content中设置segments或profile.segment_count，默认2段。工具按真实空档计算各段起止，允许不等长，不猜时间。
 memory_suggestion使用memory_schema。没有权限时calls为空；缺必要字段只返回questions，不执行依赖答案的动作。
@@ -280,8 +280,8 @@ def split_planning_draft(db,id,version,content,target):
         day=dt(start).date()
         formal=db.get(TaskSchedulingProfile,int(target.split(':')[1])) if target.startswith('task:') else None
         bounds=profile.get('allowed_windows') or (formal.settings.get('allowed_windows') if formal else None) or [
-            {'start_at':datetime.combine(day,time(8),SHANGHAI).isoformat(),
-                'end_at':datetime.combine(day,time(22),SHANGHAI).isoformat()}]
+            {'start_at':datetime.combine(day,time.min,SHANGHAI).isoformat(),
+                'end_at':datetime.combine(day+timedelta(days=1),time.min,SHANGHAI).isoformat()}]
         profile.update(splittable=True,segment_count=count,max_segments=count,min_block_minutes=5,allowed_windows=bounds)
         fields['profile']=profile
     result=workspace_drafts.edit(db,'planning',id,version,prepared)

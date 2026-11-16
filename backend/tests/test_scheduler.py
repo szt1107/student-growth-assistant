@@ -30,6 +30,15 @@ def rule(rule_id: int = 1, **changes) -> TimeRuleInput:
     ), **changes)
 
 
+def explicit_daytime_only_rules():
+    # These capacity examples intentionally restrict work to 08:00–22:00;
+    # that window is a user rule now, not a global calendar restriction.
+    return [rule(100+2*day+part, kind="protected", weekday=day+1,
+        start_time=start, end_time=end)
+        for day in range(7) for part,(start,end) in enumerate(
+            [(time.min,time(8)),(time(22),time.max)])]
+
+
 def test_single_task_gets_monday_0800_and_passes_validator() -> None:
     tasks = [task()]
     result = schedule_week(WEEK, tasks, [])
@@ -107,7 +116,7 @@ def test_weekly_course_and_protected_rules_expand_on_local_weekday() -> None:
         rule(2, kind="protected", end_time=time(22), weekday=2),
         rule(3, weekday=3),
     ]
-    result = schedule_week(WEEK, [task()], rules)
+    result = schedule_week(WEEK, [task()], rules+explicit_daytime_only_rules())
     assert result.assignments[0].start_at == at(7, 10)
     midnight_course = rule(4, weekday=3, start_time=time(0), end_time=time(1))
     interval = expand_time_rules(WEEK, [midnight_course])[0]
@@ -146,7 +155,7 @@ def test_task_may_end_exactly_at_aware_utc_deadline() -> None:
 
 @pytest.mark.parametrize("deadline", [at(hour=9), at(4, 22)])
 def test_early_or_pre_week_deadline_is_unschedulable(deadline) -> None:
-    result = schedule_week(WEEK, [task(duration_minutes=120, deadline=deadline)], [])
+    result = schedule_week(WEEK, [task(duration_minutes=120, deadline=deadline)], explicit_daytime_only_rules())
     assert result.status == "unschedulable"
     assert result.assignments == ()
     assert result.unscheduled_tasks[0].task_id == 1
@@ -164,7 +173,7 @@ def test_long_task_requires_one_continuous_interval() -> None:
 def test_total_free_time_is_not_enough_when_it_is_fragmented() -> None:
     rules = [rule(index + 1, kind="protected", start_time=time(hour), end_time=time(hour + 1)) for index, hour in enumerate(range(9, 22, 2))]
     # Seven free hours remain on Monday, but every free interval is only 60 minutes.
-    result = schedule_week(WEEK, [task(duration_minutes=120, deadline=at(hour=22))], rules)
+    result = schedule_week(WEEK, [task(duration_minutes=120, deadline=at(hour=22))], rules+explicit_daytime_only_rules())
     assert result.status == "unschedulable"
     assert [item.task_id for item in result.unscheduled_tasks] == [1]
 
@@ -177,17 +186,17 @@ def test_later_tasks_skip_occupied_slots_and_can_fill_an_earlier_gap() -> None:
     assert validate_schedule(WEEK, tasks, rules, result.assignments).valid
 
 
-def test_task_at_2100_cannot_cross_day_and_searches_next_day() -> None:
+def test_task_at_2100_can_finish_after_2200() -> None:
     rules = [rule(kind="protected", end_time=time(21))]
     result = schedule_week(WEEK, [task(duration_minutes=120)], rules)
-    assert result.assignments[0].start_at == at(6, 8)
-    assert result.assignments[0].end_at == at(6, 10)
+    assert result.assignments[0].start_at == at(5, 21)
+    assert result.assignments[0].end_at == at(5, 23)
 
 
 @pytest.mark.parametrize("available_day", range(7))
 def test_searches_every_day_through_sunday_and_allows_2200_end(available_day) -> None:
     rules = [rule(day + 1, kind="protected", weekday=day + 1, end_time=time(22)) for day in range(available_day)]
-    result = schedule_week(WEEK, [task(duration_minutes=840)], rules)
+    result = schedule_week(WEEK, [task(duration_minutes=840)], rules+explicit_daytime_only_rules())
     assert result.status == "feasible"
     assert result.assignments[0].start_at == at(5 + available_day, 8)
     assert result.assignments[0].end_at == at(5 + available_day, 22)
@@ -195,7 +204,7 @@ def test_searches_every_day_through_sunday_and_allows_2200_end(available_day) ->
 
 def test_no_available_day_reports_unschedulable() -> None:
     rules = [rule(day + 1, kind="protected", weekday=day + 1, end_time=time(22)) for day in range(7)]
-    assert schedule_week(WEEK, [task()], rules).status == "unschedulable"
+    assert schedule_week(WEEK, [task()], rules+explicit_daytime_only_rules()).status == "unschedulable"
 
 
 @pytest.mark.parametrize("status", ["done", "cancelled"])
@@ -243,7 +252,7 @@ def test_invalid_rule_input_is_rejected(changes) -> None:
 
 
 def test_collects_all_failures_and_discards_partial_assignments() -> None:
-    tasks = [task(1, duration_minutes=870), task(2, duration_minutes=30 * 10**30), task(3)]
+    tasks = [task(1, duration_minutes=1470), task(2, duration_minutes=30 * 10**30), task(3)]
     result = schedule_week(WEEK, tasks, [])
     assert result.status == "unschedulable"
     assert [item.task_id for item in result.unscheduled_tasks] == [1, 2]
@@ -253,7 +262,7 @@ def test_collects_all_failures_and_discards_partial_assignments() -> None:
 def test_greedy_failure_does_not_prove_that_no_schedule_exists() -> None:
     tasks = [task(1, deadline=at(hour=11, minute=30)), task(2, duration_minutes=90, deadline=at(hour=12))]
     rules = [rule(kind="protected", start_time=time(9, 30), end_time=time(11))]
-    result = schedule_week(WEEK, tasks, rules)
+    result = schedule_week(WEEK, tasks, rules+explicit_daytime_only_rules())
     assert result.status == "unschedulable"
     assert [item.task_id for item in result.unscheduled_tasks] == [2]
     alternative = [Assignment(2, "Task 2", at(), at(hour=9, minute=30)), Assignment(1, "Task 1", at(hour=11), at(hour=11, minute=30))]

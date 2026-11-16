@@ -87,7 +87,13 @@ diagnostics 保留 code/message 并按事实附加 ref/task_id、constraint、or
 
 `GET/PATCH /api/workspace/drafts/planning/{id}` 读取或编辑日程草案，编辑提交 `expected_version` 和 `content`。单任务初稿使用 `content.schedule`，通用规划使用 `content.actions`。编辑只保存待审核内容，正式采用走 `/confirm`。
 
-单任务初稿的 `time_period` 可取 morning、noon、afternoon、evening 或 null，对应08–12、12–14、14–18、18–22时。建议起点分别为09、12、14、19时，执行日期和截止日期分别解析。普通钟点可避让占用，明确固定钟点使用 `start_exact=true`，已过去的固定时间要求用户重新选择。手动修改具体起止时间时，前端显式清除旧 `time_period` 并固定所填时间。
+单任务初稿的 `time_period` 可取 dawn、morning、noon、afternoon、evening 或 null，对应00–06、06–12、12–14、14–18、18–24时；null表示所选日期的全天窗口。各时段的建议起点分别为00、08、12、14、19时，无时段或钟点时默认08:00。执行日期和截止日期分别解析。用户给出具体开始钟点即使用 `start_exact=true`（通用动作使用 `profile.fixed_start`）；“左右、可以调整”等明确灵活表达才允许避让。具体钟点优先于宽泛时段，冲突或已过的指定时间保持原值并返回诊断，不自动改期。手动修改具体起止时间时，前端清除旧 `time_period` 并固定所填时间。
+
+日程草案和正式任务片段可在全天00:00–24:00安排，用户指定的开始时间可跨午夜结束，单个连续片段不超过1440分钟。`SchedulePreview.duration_minutes`及`min_block_minutes`上限为1440，仍采用5分钟网格。单任务未指定精确钟点的自动建议保持在所选日期/时段内；不因跨日而放宽两周范围、真实截止、占用或锁定校验。`POST /api/calendar/changes`调整正式任务同样允许凌晨、深夜和跨午夜时间，非法网格仍返回422 `TASK_GRID`。
+
+名称从用户描述的具体活动提取，不限学习关键词；“进行升旗仪式”取“升旗仪式”，“半个小时”取30分钟。未提供真实截止时仍为空，不将安排结束自动写为用户截止。旧未采用草案可从原消息恢复被默认值覆盖的名称、时长和时间，读取不改库，返回 `requires_recalculation=true` 后需显式保存编辑再确认。
+
+日历 `free` 按天返回全天空档；优先处理 `free_intervals` 覆盖全天并合并跨午夜的连续空档。二者均扣除真实占用，候选起点另行校验任务约束。详见[当前修复与验证](beautification/scheduling-fixes-2026-11-16.md)。
 
 `POST /api/workspace/drafts/planning/{id}/split` 接收 `expected_version`、`content` 和 `target`，按真实空档重新分段。单任务使用 `segments`、`break_minutes`、`work_segments`，通用规划使用 `profile.segment_count`、`min_break_minutes` 和 `allowed_windows`。段数为2–8，每段采用5分钟网格，工作分钟合计须等于预计时长，并通过日期、时段、课程、截止和锁定校验。旧初稿需要恢复原时间要求时返回 `requires_recalculation=true`，重新保存后再确认。
 

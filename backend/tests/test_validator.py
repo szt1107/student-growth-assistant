@@ -81,9 +81,16 @@ def test_outside_selected_week(day) -> None:
     (at(hour=21, minute=30), at(hour=22, minute=30)),
     (at(hour=21, minute=30), at(6, 8, 30)),
 ])
-def test_working_hours_and_cross_day(start, end) -> None:
-    result = validate_schedule(WEEK, [task()], [], [assignment(start_at=start, end_at=end)])
-    assert "OUTSIDE_WORKING_HOURS" in codes(result)
+def test_all_hours_and_cross_day_are_valid(start, end) -> None:
+    minutes=int((end-start).total_seconds()/60)
+    result = validate_schedule(WEEK, [task(duration_minutes=minutes)], [], [assignment(start_at=start, end_at=end)])
+    assert result.valid
+
+
+def test_one_continuous_assignment_cannot_exceed_24_hours() -> None:
+    start,end=at(hour=8),at(6,9)
+    result=validate_schedule(WEEK,[task(duration_minutes=1500)],[],[assignment(start_at=start,end_at=end)])
+    assert 'OUTSIDE_WORKING_HOURS' in codes(result)
 
 
 @pytest.mark.parametrize("start,end", [

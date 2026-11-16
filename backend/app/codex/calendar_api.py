@@ -1,4 +1,5 @@
 """Transactional calendar editing over existing schedules and local events."""
+from ..services.grid import valid_task_interval
 from datetime import date, datetime, time, timedelta
 from hashlib import sha256
 from typing import Literal
@@ -171,8 +172,8 @@ def change_calendar(payload:CalendarChange,db:Session=Depends(get_db)):
                         error('TASK_REMAINING_CHANGED','任务剩余时长已变化，与原安排不同。请先按最新剩余时长重新生成安排，再调整分段长度。',409)
                     if task.duration_minutes+delta<=0 or (task.duration_minutes+delta)%5:
                         error('TASK_DURATION','调整后的任务时长必须是正数且为5分钟的倍数。',422)
-                    if start.date()!=end.date() or start.time()<time(8) or end.time()>time(22) or start.minute%5 or end.minute%5 or start.second or end.second or start.microsecond or end.microsecond:
-                        error('TASK_GRID','任务安排需在当天08:00–22:00内，起止时间使用5分钟粒度。',422)
+                    if not valid_task_interval(start,end):
+                        error('TASK_GRID','任务支持全天24小时安排，单段最多24小时，起止时间使用5分钟粒度。',422)
                     if len(proposed)>1 and (not settings.get('splittable') or len(proposed)>settings.get('max_segments',4)):
                         error('TASK_SEGMENTS','任务分段数量不符合任务设置。',422)
                     if len(proposed)>1 and any((b-a).total_seconds()/60<settings.get('min_block_minutes',30) for a,b in proposed[:-1]):

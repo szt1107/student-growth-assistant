@@ -79,7 +79,7 @@ def calendar_events(db, start, end):
             allDay=True, kind='goal', goal_id=goal.id, source='已保存目标日期，不占用时段'))
     if len(events) > 6000:
         error('RANGE_TOO_LARGE', '此范围事项过多，请缩小日历范围。', 413)
-    # Free windows only describe 08:00–22:00 after real occupied/protected blocks.
+    # Full-day free windows exclude real occupied/protected blocks.
     from ..codex.calendar_api import projected_entries
     for entry in projected_entries(db,a,b,calendar_entries):
         if entry['source_rule_id']:
@@ -90,7 +90,7 @@ def calendar_events(db, start, end):
             busy.append((datetime.fromisoformat(entry['busy_start']),datetime.fromisoformat(entry['busy_end'])))
     free = []
     for n in range((end-start).days):
-        day=start+timedelta(days=n); left=datetime.combine(day,time(8),SHANGHAI); right=datetime.combine(day,time(22),SHANGHAI)
+        day=start+timedelta(days=n); left=datetime.combine(day,time.min,SHANGHAI); right=left+timedelta(days=1)
         cursor=left
         for begin,finish in sorted((max(left,x),min(right,y)) for x,y in busy if x<right and y>left):
             if begin>cursor:free.append(dict(start=cursor.isoformat(),end=begin.isoformat()))
