@@ -3,6 +3,7 @@ import ClockBadge from '../codex/ClockBadge.jsx'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../codex/ui/tooltip.jsx'
 import { cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState, Suspense } from 'react'
 import { defaultSplitRatio, renderedSplitRatio, splitBounds, toolPlacement, workbenchPanel, workbenchVisibility, workspacePages } from '../workbench.js'
+import { logoutAccount } from '../api.js'
 
 const labels = { home: '首页', schedule: '日程', review: '复盘', profile: '档案' }
 const navigationIcons = {
@@ -17,6 +18,8 @@ export default function WorkspaceShell({ state, dispatch, chat, children, review
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches)
   const [gridWidth, setGridWidth] = useState(1440)
   const [auxiliaryTarget, setAuxiliaryTarget] = useState(null)
+  const [signingOut, setSigningOut] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
   const root = useRef(null), grid = useRef(null), lastFocus = useRef(null), drag = useRef(null)
   const panel = state.navigation === 'home' ? workbenchPanel(state) : 'collapsed'
   const visible = workbenchVisibility(state, narrow)
@@ -30,6 +33,17 @@ export default function WorkspaceShell({ state, dispatch, chat, children, review
   const bounds = splitBounds(available)
   const resizable = home && !narrow && panel === 'normal'
   const controls = 'v2-auxiliary-shared'
+
+  async function signOut() {
+    if (signingOut) return
+    setSigningOut(true)
+    setLogoutError('')
+    try {
+      await logoutAccount()
+      window.location.replace('/login')
+    } catch (cause) { setLogoutError(cause.message) }
+    finally { setSigningOut(false) }
+  }
 
   useEffect(()=>{
     const viewport=window.visualViewport
@@ -166,5 +180,9 @@ export default function WorkspaceShell({ state, dispatch, chat, children, review
         <div ref={setAuxiliaryTarget} hidden={Boolean(auxiliaryPreview&&previewPage===state.auxiliaryPage)} inert={Boolean(auxiliaryPreview&&previewPage===state.auxiliaryPage)}/>
       </div>
     </div>
+    <footer className="v2-session-actions">
+      {logoutError && <p className="v2-logout-error" role="alert">{logoutError}</p>}
+      <Button type="button" variant="outline" size="sm" className="v2-logout" disabled={signingOut} onClick={signOut}>{signingOut ? '正在注销…' : '注销'}</Button>
+    </footer>
   </div>
 }

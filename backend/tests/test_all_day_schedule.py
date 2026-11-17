@@ -86,11 +86,11 @@ def test_fixed_time_conflict_does_not_shift_or_write(client, defaults_chat, morn
     assert call(client, '/api/tasks') == []
 
 
-def test_past_explicit_clock_stays_in_conflict(client, defaults_chat):
+def test_past_explicit_clock_becomes_calendar_record(client, defaults_chat):
     draft = ref_of(send(client, defaults_chat, TEXT))
-    assert draft['status'] == 'conflict' and not draft['items']
+    assert draft['status'] == 'ready' and draft['calendar_record']
     assert draft['content']['schedule']['start_time'] == '07:30'
-    assert any(problem['code'] == 'START_IN_PAST' for problem in draft['problems'])
+    assert draft['items'][0]['start_at'] == '2026-10-14T07:30:00+08:00'
 
 
 @pytest.mark.parametrize('clock,minutes', [('00:00', 30), ('05:30', 30), ('07:30', 30), ('23:30', 30), ('23:30', 60), ('00:00', 1440)])

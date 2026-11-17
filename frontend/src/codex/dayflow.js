@@ -14,6 +14,15 @@ export function calendarEventsWithPreview(events,preview){
  const replaced=new Set(preview?.taskIds||[])
  return [...events.filter(event=>event.kind!=='formal_task'||!replaced.has(event.task_id)||Date.parse(event.start)<Date.parse(preview?.asOf)),...(preview?.events||[])]
 }
+// Unsaved calendar selections stay visible while the editor is open. They
+// belong to the local calendar projection, never the persisted event list.
+export function calendarSelectionPreview(fields){
+ if(!fields||fields.event_id||!fields.start||!fields.end)return []
+ const start=apiTime(fields.start,fields.all_day),end=apiTime(fields.end,fields.all_day)
+ if(!Number.isFinite(Date.parse(start))||!Number.isFinite(Date.parse(end))||Date.parse(end)<=Date.parse(start))return []
+ return [{id:'calendar-selection:pending',kind:'calendar_selection',calendar_group:'selection-preview',
+  title:fields.title||'新建日程',description:fields.description||'',start,end,allDay:Boolean(fields.all_day)}]
+}
 export function toDayFlowEvent(event){
  const allDay=Boolean(event.allDay)
  const start=allDay?Temporal.PlainDate.from(event.start):Temporal.Instant.from(event.start).toZonedDateTimeISO('Asia/Shanghai')

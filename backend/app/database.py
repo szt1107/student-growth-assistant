@@ -10,6 +10,7 @@ from sqlalchemy import DateTime, create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from sqlalchemy.types import TypeDecorator
+from fastapi import Request
 
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -64,9 +65,10 @@ class UTCDateTime(TypeDecorator):
         return value.astimezone(timezone.utc)
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db(request: Request) -> Generator[Session, None, None]:
     """Provide one database session for a request, then close it."""
-    db = SessionLocal()
+    db = Session(getattr(request.state, 'workspace_engine', request.app.state.db_engine),
+        autoflush=False, autocommit=False)
     try:
         yield db
     finally:

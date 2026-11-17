@@ -23,7 +23,7 @@ async def mock_breakdown(request, now):
                          for i, title in enumerate(("需求分析", "实现与验证"))]}
 
 
-def serve(port, now=NOW):
+def serve(port, now=NOW, auth=False):
     database = ROOT/"scripts/.runtime"/f"demo-integration-{uuid4().hex}.db"
     database.parent.mkdir(parents=True, exist_ok=True)
     os.environ.update(SGA_DEMO="1", SGA_DEMO_NOW=now, SGA_DATABASE_PATH=str(database),
@@ -57,6 +57,11 @@ def serve(port, now=NOW):
     wire_plan=conversation_tools.plan
     async def mock_tools(request):
         text=request['message']
+        if text.startswith('草案审计：'):
+            await asyncio.sleep(.8)
+            return ToolPlan(calls=[{'name':'tasks'},{'name':'planning_draft','arguments':{'actions':[
+                {'op':'add','fields':{'title':'软件工程演讲稿','duration_minutes':60,
+                    'profile':{'fixed_start':'2026-11-16T19:00:00+08:00'}}}]}}])
         if text.startswith('质量验收：'):return await wire_plan(request)
         if text=='大概一个半小时，你帮我安排一下。':
             raise claude_client.AIServiceError('AI_RESPONSE_INVALID')  # Default-first acceptance: two invalid plans.
@@ -161,6 +166,7 @@ def serve(port, now=NOW):
     conversation_runs.reply_events = mock_reply
     growth_insights.launch_automatic_analysis = lambda *a, **k: None
     from app.main import app
+    app.state.auth_required = auth
 
     @app.middleware("http")
     async def mark_isolated_mock(request, call_next):
@@ -255,11 +261,12 @@ def main():
     mode.add_argument("--verify", action="store_true")
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--now",default=NOW,help="Explicit anonymous demo clock; never affects normal startup")
+    parser.add_argument("--auth",action="store_true",help="Enable real accounts in the disposable Mock server")
     parser.add_argument("--api", default="http://127.0.0.1:8001")
     parser.add_argument("--output", type=Path, default=ROOT/"scripts/.local/integration-demo.json")
     args = parser.parse_args()
     if args.serve:
-        serve(args.port,args.now)
+        serve(args.port,args.now,args.auth)
     else:
         target = urlsplit(args.api)
         if target.scheme != "http" or target.hostname not in ("127.0.0.1", "localhost", "::1") or target.username or target.password:

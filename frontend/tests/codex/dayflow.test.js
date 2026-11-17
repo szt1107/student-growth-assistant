@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {toDayFlowEvent, fieldsFromEvent, calendarRange, miniMonth} from '../../src/codex/dayflow.js'
+import {toDayFlowEvent, fieldsFromEvent, calendarSelectionPreview, calendarRange, miniMonth} from '../../src/codex/dayflow.js'
 
 test('timed events preserve the Shanghai instant and original IDs',()=>{
  const event=toDayFlowEvent({id:'plan:9',title:'任务',start:'2026-11-02T06:00:00Z',end:'2026-11-02T07:00:00Z',kind:'formal_task',task_id:3})
@@ -13,6 +13,23 @@ test('all-day end stays exclusive with no timezone shift',()=>{
  const event=toDayFlowEvent({id:'calendar:8',title:'跨日',start:'2026-11-02',end:'2026-11-05',allDay:true,kind:'calendar'})
  assert.equal(fieldsFromEvent(event).end,'2026-11-05')
  assert.equal(event.start.toString(),'2026-11-02')
+})
+
+test('unsaved selections preserve edited cross-midnight and all-day intervals without projecting saved entries',()=>{
+ const fields={title:'深夜事项',start:'2026-11-16T23:30',end:'2026-11-17T00:30',all_day:false,event_id:null}
+ const [preview]=calendarSelectionPreview(fields)
+ const event=toDayFlowEvent(preview)
+ assert.equal(event.start.hour,23)
+ assert.equal(event.end.hour,0)
+ assert.equal(event.end.day,17)
+ assert.equal((event.end.epochMilliseconds-event.start.epochMilliseconds)/60000,60)
+ assert.equal(preview.kind,'calendar_selection')
+ assert.equal(preview.calendar_group,'selection-preview')
+ const [allDay]=calendarSelectionPreview({...fields,start:'2026-11-16',end:'2026-11-17',all_day:true})
+ assert.equal(fieldsFromEvent(toDayFlowEvent(allDay)).end,'2026-11-17')
+ for(const patch of [{event_id:'calendar:1'},{start:''},{end:''},{end:fields.start},{end:'invalid'}])
+  assert.deepEqual(calendarSelectionPreview({...fields,...patch}),[])
+ assert.deepEqual(calendarSelectionPreview(null),[])
 })
 test('deadline markers without an end get a one-day exclusive span',()=>{
  const event=toDayFlowEvent({id:'deadline:2',title:'截止',start:'2026-11-02',allDay:true,kind:'deadline'})

@@ -83,7 +83,8 @@ def context_for(db,run):
             goals=db.scalars(select(GrowthGoal).order_by(GrowthGoal.id.desc()).limit(40)).all()
             goals.sort(key=lambda g:sum(w in g.title.lower() for w in words),reverse=True)
             facts['goals']=[dict(id=g.id,title=g.title,status=g.status,weekly_target=g.weekly_target,due_date=g.due_date.isoformat() if g.due_date else None,version=g.version) for g in goals[:6]]
-            from .taxonomy import rules_payload
+            from .taxonomy import rules_payload, categories_payload
+            facts['categories']=categories_payload(db)
             facts['preferences']=rules_payload(db)[:8]
             links.append({'page':'profile','kind':'profile','label':'查看正式目标与偏好'})
         if signals['planning']:

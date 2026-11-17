@@ -49,7 +49,9 @@ def create(payload: ConversationCreate, db: Session = Depends(get_db)):
 
 @router.get('/{id}')
 def detail(id: ConversationId, db: Session = Depends(get_db)):
-    return summary(require_conversation(db, id))
+    from ..services.conversations import parent_conversation
+    session = require_conversation(db, id)
+    return {**summary(session), 'conversation_id': parent_conversation(db, session)}
 
 
 @router.patch('/{id}')
@@ -109,8 +111,19 @@ def messages(id: ConversationId, after_id: int = Query(default=0, ge=0, le=92233
     cursor = rows[-1].id if more else None
     if reverse:
         rows.reverse()
+    previous_before_id = None
+    next_after_id = None
+    if rows:
+        boundary = [AssistantMessage.session_id == id, AssistantMessage.owner_id == session.owner_id]
+        if q is not None:
+            boundary.append(AssistantMessage.text.contains(q.strip(), autoescape=True))
+        if db.scalar(select(AssistantMessage.id).where(*boundary, AssistantMessage.id < rows[0].id).limit(1)) is not None:
+            previous_before_id = rows[0].id
+        if db.scalar(select(AssistantMessage.id).where(*boundary, AssistantMessage.id > rows[-1].id).limit(1)) is not None:
+            next_after_id = rows[-1].id
     return {'items': [message_data(m) for m in rows], 'has_more': more,
-            'next_after_id': cursor if not reverse else None, 'next_before_id': cursor if reverse else None}
+            'next_after_id': next_after_id, 'next_before_id': cursor if reverse else None,
+            'previous_before_id': previous_before_id}
 
 
 @router.post('/{id}/messages', status_code=201)

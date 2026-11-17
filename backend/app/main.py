@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 from . import models  # Register all tables with the existing Base.
 from .models import AssistantRun
 from .database import Base, engine
-from .routers import dashboard, constraints, data, execution, goals, growth, plan_explanations, plans, tasks, task_breakdown, time_rules, assistant, taxonomy, conversations, workspace, secretary
+from .routers import dashboard, constraints, data, execution, goals, growth, plan_explanations, plans, tasks, task_breakdown, time_rules, assistant, taxonomy, conversations, workspace, secretary, auth
+from .account_middleware import AccountMiddleware, ALLOWED_ORIGINS
+from .services.accounts import AccountStore
 from .services.growth_migrations import apply_growth_migrations
 from .services.growth_data import create_daily_backup
 from .services.schema_migrations import upgrade_database
@@ -41,23 +43,31 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                 if output:
                     output.content = {**(output.content or {}), 'status': 'interrupted'}
         session.commit()
+    application.state.accounts = AccountStore(application.state.db_engine)
     from .services.claude_client import ai_client_session
     async with ai_client_session(), speech_lifespan(application):
         try:
             yield
         finally:
             from .services.conversation_runs import shutdown
-            await shutdown(application.state.db_engine)
+            for workspace_engine in application.state.accounts.workspace_engines():
+                await shutdown(workspace_engine)
+                await assistant.shutdown_runs(workspace_engine)
+            application.state.accounts.close()
 
 
 app = FastAPI(lifespan=lifespan)
 app.state.db_engine = engine
+app.state.auth_required = True
+app.add_middleware(AccountMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174", "http://localhost:5175", "http://127.0.0.1:5175", "http://127.0.0.1:5187"],
+    allow_origins=list(ALLOWED_ORIGINS),
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Account-Id"],
 )
+app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(task_breakdown.router)
 app.include_router(tasks.router)

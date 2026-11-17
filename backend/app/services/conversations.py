@@ -1,4 +1,5 @@
 """Local conversation lifecycle. No AI, business writes, or client identity trust."""
+import re
 from sqlalchemy import select, func, or_, exists, update
 from fastapi import HTTPException
 
@@ -61,6 +62,16 @@ def summary(session):
     )}
 
 
+def parent_conversation(db, session):
+    if session.scope == 'conversation':
+        return None
+    match = re.fullmatch(r'tool:(\d+):(?:planning|profile|review):(?:all|\d{4}-\d{2}-\d{2})', session.client_request_id or '')
+    if not match:
+        return None
+    parent = require_conversation(db, int(match[1]))
+    return parent.id if parent.scope == 'conversation' else None
+
+
 def message_data(message):
     return {key: getattr(message, key) for key in ('id', 'session_id', 'role', 'text', 'content', 'proposal_id', 'created_at')}
 
@@ -76,6 +87,11 @@ def snippet(text, query):
 def list_conversations(db, *, query, archive, scope, limit, offset):
     owner = local_owner(db)
     conditions = [AssistantSession.owner_id == owner, AssistantSession.deleted_at.is_(None)]
+    # Tool sessions store draft receipts. Their messages are shown through the
+    # owning conversation, rather than as duplicate chats in the sidebar.
+    conditions.append(or_(AssistantSession.scope == 'conversation',
+                          AssistantSession.client_request_id.is_(None),
+                          ~AssistantSession.client_request_id.startswith('tool:', autoescape=True)))
     if archive != 'all':
         conditions.append(AssistantSession.archived_at.is_(None) if archive == 'active' else AssistantSession.archived_at.is_not(None))
     if scope != 'all':

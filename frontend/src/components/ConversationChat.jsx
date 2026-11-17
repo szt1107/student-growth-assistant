@@ -12,6 +12,7 @@ import { reviewRange } from '../calendar.js'
 const MemoryCard=lazy(()=>import('./MemoryPanel.jsx').then(module=>({default:module.MemoryCard})))
 import SafeMessage from './SafeMessage.jsx'
 import ChatComposer from '../codex/ChatComposer.jsx'
+import ConversationProgress from './ConversationProgress.jsx'
 
 const statuses = { failed: '回复未正常结束，内容可能不完整', cancelled: '已停止生成', interrupted: '回复已中断，可重试' }
 
@@ -35,8 +36,9 @@ export function ConversationRunStatus({ run, busy, onRetry }) {
   </section>
 }
 
-export default function ConversationChat({ workspace, id, target, revision, onChanged, active = true, onNavigate, onDraftPreview, today, intent, onIntentHandled, onLocate, initialMode = null }) {
+export default function ConversationChat({ workspace, id, target, revision, onChanged, active = true, onNavigate, onDraftPreview, onRedirect, today, intent, onIntentHandled, onLocate, initialMode = null }) {
   const [meta, setMeta] = useState(null), [messages, setMessages] = useState([]), [next, setNext] = useState(null)
+  const [previous, setPrevious] = useState(null)
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [run, setRun] = useState(null), [observing, setObserving] = useState(true), [reload, setReload] = useState(0)
   const [unavailable, setUnavailable] = useState(false), [input, setInput] = useState({ text: '', requestId: null, mode: initialMode })
@@ -59,6 +61,11 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
   },[intentPending])
   const toolSignature=useRef('')
   const gate = useRef(requestGate()), alive = useRef(true), locked = useRef(false), cursor = useRef({})
+  const loadedMessages = useRef(messages)
+  const loadedTarget = useRef(null)
+  const pendingNext = useRef(next)
+  loadedMessages.current = messages
+  pendingNext.current = next
   const recovery = useEditRecovery({ workspace, resource: `conversation:${id}:input`, base: meta ? `${id}:${meta.scope}` : undefined,
     value: input, dirty: Boolean(input.text), restore: value => setInput({ text: typeof value.text === 'string' ? value.text : '', requestId: value.requestId || null, mode: ['plan','review','profile'].includes(value.mode) ? value.mode : null }), automatic: true })
   useEffect(() => { alive.current = true; return () => { alive.current = false; gate.current.next() } }, [])
@@ -77,16 +84,45 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
     setLoading(true); setError(''); setUnavailable(false)
     ;(async () => {
       const current = await getConversation(id)
+      if (!alive.current || !gate.current.current(token)) return
+      if (current.conversation_id && current.conversation_id !== id) {
+        onRedirect?.(current.conversation_id)
+        return
+      }
       let anchor=null;try{anchor=JSON.parse(sessionStorage.getItem(`sga-chat-scroll:${workspace}:${id}`))?.first_id}catch{/* optional scroll preference */}
-      const [page, runs] = await Promise.all([
-        getConversationMessages(id, target?{after_id:Math.max(0,target-1),limit:30}:Number.isSafeInteger(anchor)&&anchor>0?{after_id:anchor-1,limit:30}:{latest:true,limit:30}),
+      const existing = loadedMessages.current
+      const locating = Boolean(target && target !== loadedTarget.current)
+      let pageQuery = {latest:true, limit:30}
+      if (locating) pageQuery = {after_id:Math.max(0,target-1), limit:30}
+      else if (existing.length) pageQuery = {after_id:pendingNext.current??existing.at(-1).id, limit:30}
+      else if (Number.isSafeInteger(anchor) && anchor>0) pageQuery = {after_id:anchor-1, limit:30}
+      const [initialPage, runs] = await Promise.all([
+        getConversationMessages(id,pageQuery),
         current.scope === 'conversation' ? getConversationRuns(id) : Promise.resolve({ items: [] }),
       ])
       if (!alive.current || !gate.current.current(token)) return
-      setMeta(current); setMessages(page.items);setWindowStart(0); setNext(page.next_after_id)
+      let page = initialPage
+      if (!existing.length && !page.items.length && (anchor || locating)) {
+        page = await getConversationMessages(id, {latest:true, limit:30})
+      }
+      if (!alive.current || !gate.current.current(token)) return
+      setMeta(current)
+      if (!existing.length || locating) {
+        setMessages(page.items)
+        setWindowStart(0)
+        setPrevious(page.previous_before_id??page.next_before_id??null)
+      } else {
+        setMessages(messages=>mergeMessages(messages,page.items))
+      }
+      setNext(page.next_after_id)
+      loadedTarget.current = target
       const latest = runs.items[0]
-      if (latest) receive(latest)
-      else setRun(null)
+      setRun(latest||null)
+      if (latest && (latest.status==='running'
+          || page.items.some(message=>message.id===latest.assistant_message_id)
+          || existing.some(message=>message.id===latest.assistant_message_id))) {
+        receive(latest)
+      }
       setObserving(true)
     })().catch(cause => {
       if (!alive.current || !gate.current.current(token)) return
@@ -126,13 +162,19 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
   }
   async function loadMore(before = false) {
     if (locked.current || loading || unavailable) return
+    if ((before?previous:next)===null) return
     locked.current = true; setBusy(true); setError('')
     const token = gate.current.next()
     try {
-      const page = await getConversationMessages(id, before ? { before_id: messages[0]?.id, limit: 30 } : { after_id: next, limit: 30 })
+      const page = await getConversationMessages(id, before ? { before_id:previous,limit:30 } : { after_id:next,limit:30 })
       if (!alive.current || !gate.current.current(token)) return
-      setMessages(current => mergeMessages(current, page.items));if(before)setWindowStart(0)
-      if (!before) setNext(page.next_after_id)
+      setMessages(current => mergeMessages(current, page.items))
+      if (before) {
+        setWindowStart(0)
+        setPrevious(page.previous_before_id??page.next_before_id??null)
+      } else {
+        setNext(page.next_after_id)
+      }
     } catch (cause) { if (alive.current && gate.current.current(token)) setError(cause.message) }
     finally { locked.current = false; if (alive.current) setBusy(false) }
   }
@@ -181,14 +223,19 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
     {error && <Alert variant="destructive" role="alert">{error}<Button className="button subtle" onClick={() => setReload(value => value + 1)}>重新读取</Button></Alert>}
     {meta?.archived_at && !unavailable && <p role="status">当前会话已归档，请在会话栏恢复后再发送。</p>}
     <EditRecovery recovery={recovery} label="聊天输入" />
-    <ChatMessages storageKey={workspace?`sga-chat-scroll:${workspace}:${id}`:null} revision={`${windowStart}:${messages[0]?.id}:${messages.length}:${messages.at(-1)?.id}:${messages.at(-1)?.text?.length}`}>
+    <ChatMessages storageKey={workspace?`sga-chat-scroll:${workspace}:${id}`:null} revision={`${windowStart}:${messages[0]?.id}:${messages.length}:${messages.at(-1)?.id}:${messages.at(-1)?.text?.length}:${JSON.stringify(messages.at(-1)?.content?.progress)}`}>
       {!unavailable && <>
         {windowStart>0&&<Button className="button subtle" onClick={()=>setWindowStart(Math.max(0,windowStart-100))}>显示前一段已加载消息</Button>}
+        {windowStart===0&&previous!==null&&<Button className="button subtle" disabled={busy||loading} onClick={()=>loadMore(true)}>加载更早消息</Button>}
         {visibleMessages.map(message => <article tabIndex={-1} id={`conversation-message-${id}-${message.id}`} key={message.id} className={`workspace-message ${message.role} ${target === message.id ? 'search-match' : ''}`}>
-          <strong>{message.role === 'user' ? '我' : '成长助手'}</strong><SafeMessage text={message.text} />
+          <strong>{message.role === 'user' ? '我' : '成长助手'}</strong>
+          {message.role==='assistant'&&message.content?.run_id&&<ConversationProgress content={message.content} run={message.id===run?.assistant_message_id?run:undefined}>
+            {message.id===run?.assistant_message_id&&run.status!=='running'&&<ConversationRunStatus run={run} busy={busy} onRetry={()=>action(async()=>{await ensureConversationRuntime();const response=await retryConversationRun(id,run.id,run.attempt);if(alive.current){receive(response);setObserving(true)}})}/>}
+          </ConversationProgress>}
+          <SafeMessage text={message.text} />
           {message.content?.status && message.content.status !== 'completed' && message.id!==run?.assistant_message_id && <small>{statuses[message.content.status] || '正在生成…'}</small>}
           {(message.content?.tools||[]).filter(result=>result.memory||result.draft).map((result,index)=>result.memory?<Suspense key={index} fallback={<p role="status">正在读取记忆建议…</p>}><MemoryCard id={result.memory.id} active={active} onOpen={onNavigate}/></Suspense>:<DraftCard key={index} reference={result.draft} active={active} workspace={workspace} expanded={selectedDraftKey===`${message.id}:${index}`} onOpen={()=>selectDraft(`${message.id}:${index}`)} onClose={()=>selectDraft(null)} onSaved={onChanged} onPreview={onDraftPreview}/>)}
-          {toolNotices(message.content?.tools,message.content?.questions).map(notice=><p className="helper" key={notice}>{notice}</p>)}
+          {!message.content?.run_id&&toolNotices(message.content?.tools,message.content?.questions).map(notice=><p className="helper" key={notice}>{notice}</p>)}
           {messageResourceLinks(message.content?.links,message.content?.tools).length>0&&<div className="button-row">{messageResourceLinks(message.content?.links,message.content?.tools).map((link, i) => <Button className="button subtle" key={i} onClick={() => onNavigate?.({...link,conversationId:id,messageId:message.id})}>{link.label}</Button>)}</div>}
         </article>)}
         {windowStart+120<displayMessages.length&&<Button className="button subtle" onClick={()=>setWindowStart(Math.max(0,displayMessages.length-120))}>显示最新已加载消息</Button>}
@@ -196,7 +243,6 @@ export default function ConversationChat({ workspace, id, target, revision, onCh
         {!loading && !error && !messages.length && meta?.scope!=='conversation' && <p className="growth-empty">还没有消息。</p>}
       </>}
     </ChatMessages>
-    <ConversationRunStatus run={run} busy={busy} onRetry={() => action(async () => { await ensureConversationRuntime();const response = await retryConversationRun(id, run.id, run.attempt); if (alive.current) { receive(response); setObserving(true) } })}/>
     <footer className="aui-footer">
       {empty&&<div className="aui-welcome"><h3>计划&成长</h3></div>}
       <ChatComposer active={active} value={input.text} maxLength={2000} mode={input.mode} onModeChange={mode=>setInput(current=>({...current,mode,requestId:null}))} onChange={event=>setInput(current=>({...current,text:event.target.value,requestId:null}))} onSubmit={send}

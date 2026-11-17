@@ -144,7 +144,10 @@ def test_invalid_calendar_backup_is_rejected_before_restore(client):
     from copy import deepcopy
     assert change(client).status_code==200
     snapshot=client.get('/api/data/export').json()
-    for fields in ({'title':''},{'end_at':'2100-01-01T00:00:00+00:00'},{'all_day':True},{'source_date':'2026-11-02'}):
+    for fields in ({'title':''},{'end_at':'2100-01-01T00:00:00+00:00'},{'all_day':True},{'source_date':'2026-11-02'},
+                   {'source_key':'planning-draft:0:0'}, {'source_key':'planning-draft:1:-1'},
+                   {'source_key':'planning-draft:1:0:extra'},
+                   {'source_key':'planning-draft:1:0','source_date':'2026-11-02'}):
         bad=deepcopy(snapshot);bad['tables']['calendar_entries'][0].update(fields)
         assert client.post('/api/data/import',json=bad).status_code==422
         assert len(events(client))==1

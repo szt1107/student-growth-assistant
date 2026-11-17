@@ -27,6 +27,8 @@ export default function ChatMessages({ children, revision, className = '',storag
   useLayoutEffect(() => {
     const el=scroll.current;if(!el)return
     const first=el.querySelector('article[id]')?.id
+    const lastMessage=[...el.querySelectorAll('article[id]')].at(-1)
+    const last=lastMessage?.id, lastText=lastMessage?.textContent
     if(!initialized.current&&first){
       initialized.current=true
       try{const saved=storageKey&&JSON.parse(sessionStorage.getItem(storageKey));if(saved&&Number.isFinite(saved.top)){if(!align(el,saved.anchor))el.scrollTop=saved.top;follow.current=nearBottom(el)}}catch{/* editing recovery separately reports unavailable storage */}
@@ -34,8 +36,8 @@ export default function ChatMessages({ children, revision, className = '',storag
     const old=previous.current
     if(old?.first&&old.first!==first&&!follow.current&&Number(first?.split('-').at(-1))<Number(old.first.split('-').at(-1))){if(!align(el,anchor.current))el.scrollTop+=Math.max(0,el.scrollHeight-old.height)}
     else if(follow.current)bottom()
-    else setUnread(true)
-    previous.current={first,height:el.scrollHeight}
+    else if(old&&(old.last!==last||old.lastText!==lastText))setUnread(true)
+    previous.current={first,last,lastText,height:el.scrollHeight}
     anchor.current=position(el)
   }, [revision])
   return <div className="chat-history">

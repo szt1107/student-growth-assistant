@@ -197,7 +197,7 @@ async function verifyReviewSidebarUI(){
     const nextSteps='下周补完阅读，检查文档。参考标识：'+('长文本'.repeat(60));
     await editor.getByLabel('标题',{exact:true}).fill(title);
     await editor.getByLabel('回顾摘要',{exact:true}).fill(summary);
-    await editor.getByLabel('我的结论',{exact:true}).fill(conclusion);
+    await editor.getByLabel('复盘小结',{exact:true}).fill(conclusion);
     await editor.getByLabel('下一步（可空）',{exact:true}).fill(nextSteps);
     for(const width of [1440,1280,390]){
       await page.setViewportSize({width,height:width===390?844:1000});
@@ -885,7 +885,7 @@ async function verifyConversationUI() {
     await expect(review.locator('.review-source')).toHaveCount(1);
     await review.getByRole('button',{name:'自己写几句',exact:true}).click();
     const record=page.getByRole('form',{name:'复盘记录编辑器'});
-    await record.getByLabel('标题',{exact:true}).fill('匿名手写回顾');await record.getByLabel('我的结论',{exact:true}).fill('按自己的节奏来。');
+    await record.getByLabel('标题',{exact:true}).fill('匿名手写回顾');await record.getByLabel('复盘小结',{exact:true}).fill('按自己的节奏来。');
     await record.getByRole('button',{name:'明确保存复盘记录',exact:true}).click();
     await expect(review.getByRole('heading',{name:'匿名手写回顾',exact:true})).toBeVisible();
     checked('review:day_week_month_real_source_drilldown_manual_save');
@@ -897,7 +897,7 @@ async function verifyConversationUI() {
     await page.getByRole('button',{name:'生成可编辑预览',exact:true}).click();
     await expect(editor.getByLabel('标题',{exact:true})).toHaveValue('匿名复盘记录');
     assert.equal((await call('/api/reviews/records')).items.length,1);
-    await editor.getByLabel('我的结论',{exact:true}).fill('我审核后的结论。');
+    await editor.getByLabel('复盘小结',{exact:true}).fill('我审核后的结论。');
     await editor.getByRole('button',{name:'确认正式保存',exact:true}).click();
     await expect(editor.getByRole('status').filter({hasText:/^已保存$/})).toBeVisible();
     await expect(editor.getByRole('article',{name:'已保存的复盘内容'})).toContainText('我审核后的结论。');
