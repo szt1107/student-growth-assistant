@@ -233,7 +233,9 @@ def test_empty_plan_after_one_redecision_uses_real_default_draft(client,chat,mon
     monkeypatch.setattr(conversation_runs,'reply_events',dishonest)
     result=send(client,chat,text)
     assert len(attempts)==2 and result['status']=='completed'
-    assert '默认值' in result['delta'] and result['content']['tools'][0]['draft']['id']>0
+    assert result['content']['tools'][0]['fallback']=='trusted_defaults'
+    assert result['content']['tools'][0]['draft']['id']>0
+    assert result['content']['progress'][-1]['status']=='done'
     with Session(test_engine) as db:assert db.get(AssistantRun,result['id']).payload['skill_diagnostics']['outcome']=='awaiting_confirmation'
 
 

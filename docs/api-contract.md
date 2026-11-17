@@ -87,17 +87,41 @@ diagnostics 保留 code/message 并按事实附加 ref/task_id、constraint、or
 
 `GET/PATCH /api/workspace/drafts/planning/{id}` 读取或编辑日程草案，编辑提交 `expected_version` 和 `content`。单任务初稿使用 `content.schedule`，通用规划使用 `content.actions`。编辑只保存待审核内容，正式采用走 `/confirm`。
 
-单任务初稿的 `time_period` 可取 dawn、morning、noon、afternoon、evening 或 null，对应00–06、06–12、12–14、14–18、18–24时；null表示所选日期的全天窗口。各时段的建议起点分别为00、08、12、14、19时，无时段或钟点时默认08:00。执行日期和截止日期分别解析。用户给出具体开始钟点即使用 `start_exact=true`（通用动作使用 `profile.fixed_start`）；“左右、可以调整”等明确灵活表达才允许避让。具体钟点优先于宽泛时段，冲突或已过的指定时间保持原值并返回诊断，不自动改期。手动修改具体起止时间时，前端清除旧 `time_period` 并固定所填时间。
+单任务初稿的 `time_period` 可取 dawn、morning、noon、afternoon、evening 或 null，对应00–06、06–12、12–14、14–18、18–24时，null表示所选日期的全天窗口。各时段的建议起点分别为00、08、12、14、19时，无时段或钟点时默认08:00。用户给出具体开始钟点即使用 `start_exact=true`（通用动作使用 `profile.fixed_start`），“左右、可以调整”等明确灵活表达才允许避让。具体钟点优先于宽泛时段，真实占用返回冲突原因。手动修改具体起止时间时，前端清除旧 `time_period` 并固定所填时间。
 
 日程草案和正式任务片段可在全天00:00–24:00安排，用户指定的开始时间可跨午夜结束，单个连续片段不超过1440分钟。`SchedulePreview.duration_minutes`及`min_block_minutes`上限为1440，仍采用5分钟网格。单任务未指定精确钟点的自动建议保持在所选日期/时段内；不因跨日而放宽两周范围、真实截止、占用或锁定校验。`POST /api/calendar/changes`调整正式任务同样允许凌晨、深夜和跨午夜时间，非法网格仍返回422 `TASK_GRID`。
 
-名称从用户描述的具体活动提取，不限学习关键词；“进行升旗仪式”取“升旗仪式”，“半个小时”取30分钟。未提供真实截止时仍为空，不将安排结束自动写为用户截止。旧未采用草案可从原消息恢复被默认值覆盖的名称、时长和时间，读取不改库，返回 `requires_recalculation=true` 后需显式保存编辑再确认。
+模型分析出的有效字段可补足用户信息的缺口，来源标记为`ai_interpretation`，明确用户字段优先。名称从用户描述的实际活动提取，完整起止时段直接推导时长和截止，例如“七点半到八点进行升旗仪式”得到“升旗仪式、30分钟、07:30开始、08:00截止”。仅有开始和预计时长时，硬截止保持空值。相互矛盾的时段与时长保留原值并展示原因。
+
+模型填写的`profile.fixed_start`不会单独授权固定钟点；只有当前用户或同一任务前文中的明确钟点才能设置`start_exact`。只给“晚上”等时段时清除旧的固定标记，在所选时段内自动避让占用。`start_policy_version=6`恢复未手动编辑的旧草案中被误固定的模型建议；已采用或手动编辑的记录不改写。“安排到日程里”不构成截止时间证据。
+
+会话消息的`content.progress`为最多24条公开执行阶段，字段为`phase`、`label`、`status`（`running/done/stopped`），由实际服务阶段更新并持久化，不包含模型隐藏推理。运行中的消息展开进度，完成后折叠；工具返回的自动调整和默认值说明可在其中展开查看。原有`phase`、游标、版本和重试契约保留。
+
+`GET /api/conversations`列表省略内部工具会话，真实聊天和独立的旧业务会话继续返回。内部工具会话的详情提供`conversation_id`指向所属聊天，供旧缓存恢复原始记录。消息分页额外返回`previous_before_id`，可作为`before_id`继续向前读取。`next_after_id`可用于从历史位置向后读取，原有`latest`、`has_more`和`next_before_id`继续支持。
+
+明确指定的过去时段生成`calendar_record=true`的日历补录草案，仍通过相同的`/confirm`确认。在一个事务中复验版本和真实占用、创建`CalendarEntry`并保存确认收据，重复确认返回相同结果。确认后的补录可在日历中继续编辑，活动完成情况由用户另行记录。未来自动排程与已有正式任务历史继续使用各自的校验流程。
+
+旧未采用草案可按原请求时间恢复被错误解析的名称、时长、截止和时间段，读取时返回`requires_recalculation=true`，显式保存编辑后重新计算。手动保存过的旧草案保留编辑内容。
 
 日历 `free` 按天返回全天空档；优先处理 `free_intervals` 覆盖全天并合并跨午夜的连续空档。二者均扣除真实占用，候选起点另行校验任务约束。详见[当前修复与验证](beautification/scheduling-fixes-2026-11-16.md)。
 
 `POST /api/workspace/drafts/planning/{id}/split` 接收 `expected_version`、`content` 和 `target`，按真实空档重新分段。单任务使用 `segments`、`break_minutes`、`work_segments`，通用规划使用 `profile.segment_count`、`min_break_minutes` 和 `allowed_windows`。段数为2–8，每段采用5分钟网格，工作分钟合计须等于预计时长，并通过日期、时段、课程、截止和锁定校验。旧初稿需要恢复原时间要求时返回 `requires_recalculation=true`，重新保存后再确认。
 
 `PATCH /api/tasks/{id}` 可传 `expected_updated_at` 校验编辑依据。与最新 `updated_at` 不符时返回 `409 TASK_STALE`，客户端重新读取后核对修改。
+
+首页聊天可通过“把这个偏好写入档案”生成 `profile_draft`，后续“工作日，1h”等补充承接同一话题的用户请求。用户明确给出上午11点和1小时时，可推导11:00–12:00；缺少的信息继续询问。仅有助手建议或“嗯嗯”不会补造星期、时长或写入授权。
+
+档案草案复用 `GET/PATCH /api/workspace/drafts/profile/{id}` 及版本确认接口。`content.operations` 支持 `create_category`、`update_category`、`create_preference_rule` 等已有档案操作。新类别使用唯一 `temp_ref`（`draftcat:` 前缀），同一草案的偏好用 `category_ref` 引用；已有类别使用 `category_key`。二者互斥。草案返回 `task_categories` 供展示和编辑类别，`weekdays` 使用周一1至周日7，空值表示每天。类别、星期、起止时间在编辑器及预览中可核对，确认前不创建正式类别、偏好或日程，确认事务沿用版本检查与幂等规则。
+
+## 账号与会话
+
+`POST /api/auth/register` 与 `POST /api/auth/login` 接收 `{account,password}`。注册成功返回201，登录成功返回200，响应为 `{user:{id,account}}` 并设置 HttpOnly 会话 Cookie。注册同步初始化独立个人工作区，失败时不会留下可登录的半成品账号。同名账号（规范化后忽略大小写）返回409 `ACCOUNT_EXISTS`，错误密码返回401 `INVALID_CREDENTIALS`。每个来源的注册、登录分别限制为每分钟30次。
+
+`GET /api/auth/session` 返回 `{required,user}`，未登录时 `user=null`。`POST /api/auth/logout` 撤销当前会话并删除 Cookie，可幂等重试。会话有效期7天。HTTP 客户端携带 Cookie，浏览器跨端口调用设置 `credentials:include`，允许的开发来源使用带凭证的 CORS。
+
+业务 `/api/*` 接口与实时语音 WebSocket 需要认证，健康检查及账号接口公开。无有效会话返回401 `AUTH_REQUIRED`，跨来源写入返回403 `ORIGIN_REJECTED`。前端对业务请求携带当前账号的 `X-Account-Id`，与 Cookie 账号不一致时返回409 `ACCOUNT_CHANGED`，防止同一浏览器切换账号后旧标签页继续提交旧表单。业务响应使用 `Cache-Control:no-store`。
+
+账号和会话使用独立 SQLite 注册表，业务记录按账号选择独立 SQLite 引擎，任务ID、聊天ID、草案ID可在不同账号中相同。业务事务、后台任务、导入、导出和备份都使用请求所属的引擎。旧工作区只能通过本机 `scripts/create_account.py --legacy` 绑定，公共注册请求无法选择其他用户或旧工作区。
 
 ## Phase 1：健康检查
 

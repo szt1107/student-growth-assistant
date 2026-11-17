@@ -138,6 +138,46 @@ def test_version_and_message_idempotency_conflicts(client):
     assert len(client.get(f"/api/conversations/{conversation['id']}/messages").json()['items']) == 1
 
 
+def test_internal_draft_sessions_link_back_to_the_original_chat(client,test_engine):
+    from app.services.conversation_tools import tool_session
+    conversation=create(client,title='原始聊天')
+    message=append(client,conversation,'用户的完整问题')
+    with Session(test_engine) as db:
+        internal=tool_session(db,conversation['id'],'planning')
+        db.add(AssistantMessage(session_id=internal.id,role='assistant',owner_id=internal.owner_id,text='仅业务草案摘要'))
+        db.commit();internal_id=internal.id
+    listed=client.get('/api/conversations?scope=all').json()['items']
+    assert [row['id'] for row in listed]==[conversation['id']]
+    detail=client.get(f'/api/conversations/{internal_id}').json()
+    assert detail['conversation_id']==conversation['id']
+    assert client.get(f"/api/conversations/{conversation['id']}/messages").json()['items'][0]['id']==message['id']
+    client.delete(f"/api/conversations/{conversation['id']}?expected_version=1").raise_for_status()
+    assert client.get(f'/api/conversations/{internal_id}').status_code==410
+
+
+def test_latest_and_restored_history_windows_can_load_in_both_directions(client,test_engine):
+    conversation=create(client)
+    with Session(test_engine) as db:
+        session=db.get(AssistantSession,conversation['id'])
+        rows=[AssistantMessage(session_id=session.id,owner_id=session.owner_id,role='user',text=f'历史消息{index}') for index in range(75)]
+        db.add_all(rows);db.commit();ids=[row.id for row in rows]
+    base=f"/api/conversations/{conversation['id']}/messages"
+    latest=client.get(base+'?latest=true&limit=30').json()
+    assert [row['id'] for row in latest['items']]==ids[-30:]
+    assert latest['previous_before_id']==ids[-30] and latest['next_after_id'] is None
+    seen=[row['id'] for row in latest['items']]
+    while latest['previous_before_id'] is not None:
+        latest=client.get(base+f"?before_id={latest['previous_before_id']}&limit=30").json()
+        seen=[row['id'] for row in latest['items']]+seen
+    assert seen==ids
+    restored=client.get(base+f'?after_id={ids[20]}&limit=30').json()
+    assert restored['previous_before_id']==ids[21]
+    assert restored['next_after_id']==ids[50]
+    older=client.get(base+f"?before_id={restored['previous_before_id']}&limit=30").json()
+    newer=client.get(base+f"?after_id={restored['next_after_id']}&limit=30").json()
+    assert [row['id'] for row in older['items']+restored['items']+newer['items']]==ids
+
+
 @pytest.mark.parametrize('blocker', ['run', 'proposal', 'draft', 'stale_draft'])
 def test_archive_and_delete_refuse_running_or_unresolved_drafts_without_mutation(client, test_engine, blocker):
     conversation = create(client)

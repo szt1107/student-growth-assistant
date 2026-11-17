@@ -88,8 +88,10 @@ def client(test_engine: Engine) -> Generator[TestClient, None, None]:
             yield session
 
     original_engine = app.state.db_engine
+    original_auth_required = app.state.auth_required
     original_override = app.dependency_overrides.get(get_db)
     app.state.db_engine = test_engine
+    app.state.auth_required = False
     app.dependency_overrides[get_db] = get_test_db
     try:
         with TestClient(app) as test_client:
@@ -100,3 +102,4 @@ def client(test_engine: Engine) -> Generator[TestClient, None, None]:
         else:
             app.dependency_overrides[get_db] = original_override
         app.state.db_engine = original_engine
+        app.state.auth_required = original_auth_required

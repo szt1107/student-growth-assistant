@@ -403,9 +403,16 @@ async def _process_run(engine,run_id):
 
 
 def _launch_run(db,run_id):
+    key=(db.get_bind(),run_id)
     task=asyncio.create_task(_process_run(db.get_bind(),run_id))
-    _run_tasks[run_id]=task
-    task.add_done_callback(lambda _: _run_tasks.pop(run_id,None))
+    _run_tasks[key]=task
+    task.add_done_callback(lambda _: _run_tasks.pop(key,None) if _run_tasks.get(key) is task else None)
+
+
+async def shutdown_runs(engine):
+    pending=[task for (workspace,_),task in list(_run_tasks.items()) if workspace is engine]
+    for task in pending:task.cancel()
+    if pending:await asyncio.gather(*pending,return_exceptions=True)
 
 
 @router.get('/settings')
@@ -504,7 +511,7 @@ def get_run(id:int,db:Session=Depends(get_db)):
         run=require(db,AssistantRun,id)
         if run.status=='running' and _revision(db)!=run.source_revision:
             run.status='failed'; run.phase='finished'; run.error_code='STALE_CANDIDATE'; db.commit()
-            task=_run_tasks.get(run.id)
+            task=_run_tasks.get((db.get_bind(),run.id))
             if task and not task.done():task.cancel()
     return _run_response(run)
 
@@ -519,7 +526,7 @@ def cancel_run(id:int,db:Session=Depends(get_db)):
         proposal=db.get(AssistantProposal,proposal_id) if proposal_id else None
         if proposal and proposal.status not in ('applied','superseded'):proposal.status='discarded'
         db.commit()
-        task=_run_tasks.get(run.id)
+        task=_run_tasks.get((db.get_bind(),run.id))
         if task and not task.done():task.cancel()
     return _run_response(run)
 
@@ -687,6 +694,12 @@ def confirm(id:int,db:Session=Depends(get_db),expected_version:str|None=None):
         s=require(db,AssistantSession,p.session_id); require_current(s)
         if s.latest_proposal_id!=p.id or p.source_revision!=get_or_create_planning_state(db).revision:
             fail('STALE_CANDIDATE','候选依据的资料已变化，请重新生成。')
+        if p.payload.get('calendar_record'):
+            from ..services.calendar_drafts import apply_record
+            apply_record(db, p)
+            result = response(p)
+            db.commit()
+            return result
         world=proposed_world(db,s.week_start,p.payload['actions'],_previous_candidate(db,s),
             include_unplanned=p.payload.get('include_unplanned',True))
         _verified_scope(db,p)
@@ -825,7 +838,7 @@ def confirm_growth_draft(id:int,db:Session=Depends(get_db),expected_version:str|
                 category_key=operation.get('category_key') or category_refs.get(operation.get('category_ref'))
                 if operation.get('category_ref') and not category_key: fail('INVALID_DRAFT','偏好引用的新增类别不存在。',422)
                 values=validate_rule(db,dict(name=operation.get('name'),description=operation.get('description',''),kind=operation.get('kind'),category_key=category_key,weekdays=operation.get('weekdays'),parameters=operation.get('parameters'),source='user'))
-                db.add(PreferenceRule(**values))
+                db.add(PreferenceRule(**values,enabled=operation.get('enabled',True)))
             elif draft.scope=='profile' and op=='update_preference_rule':
                 row=require(db,PreferenceRule,int(operation['id']))
                 changes=operation.get('fields') or {}

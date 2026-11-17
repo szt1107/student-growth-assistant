@@ -1,13 +1,13 @@
 import { Alert } from './ui/controls.js'
 import { Button, Input, Label } from './ui/controls.js'
-import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react'
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react'
 import { PanelLeft, Plus, ChevronLeft, ChevronRight } from 'lucide-react'
 import {DayFlowCalendar,useCalendarApp,createDayView,createWeekView,createMonthView,createYearView,createAgendaView,createEventsPlugin} from '@dayflow/react'
 import {createDragPlugin} from '@dayflow/plugin-drag'
 import {createLocalizationPlugin,zh} from '@dayflow/plugin-localization'
 import '@dayflow/core/dist/styles.components.css'
 import {getCalendarEvents} from '../api.js'
-import {toDayFlowEvent,fieldsFromEvent,groups,calendarGroup,calendarEventsWithPreview,calendarRange,miniMonth,navigationDay,navigationDate} from './dayflow.js'
+import {toDayFlowEvent,fieldsFromEvent,groups,calendarGroup,calendarEventsWithPreview,calendarSelectionPreview,calendarRange,miniMonth,navigationDay,navigationDate} from './dayflow.js'
 import CalendarEditor from './CalendarEditor.jsx'
 import {useEditRecovery} from '../components/EditRecovery.jsx'
 import {editKey,readEdit,writeEdit} from '../workbench.js'
@@ -25,12 +25,14 @@ export default function DayFlowWorkspace({workspace,today,active,refreshVersion,
  const [hidden,setHidden]=useState([]),[miniDate,setMiniDate]=useState(today)
  const appRef=useRef(null),latest=useRef(null),fetchId=useRef(0),editRef=useRef(null),deleteTimer=useRef(null),surface=useRef(null),pointerAnchor=useRef(null),loadedRange=useRef(null)
  const previousToday=useRef(today)
+ const previewDay=toDatetimeLocalValue(draftPreview?.focusAt).slice(0,10)
  const viewResource=compact?'dayflow-calendar-auxiliary':'dayflow-calendar'
  latest.current={data,editing,day,view}
  const views=useMemo(()=>[createDayView({showHalfHourLines:true,hourHeight:72,firstHour:0,lastHour:24,scrollToCurrentTime:false}),createWeekView({startOfWeek:1,showHalfHourLines:true,hourHeight:72,firstHour:0,lastHour:24,scrollToCurrentTime:false}),createMonthView({startOfWeek:1}),createYearView({startOfWeek:1}),createAgendaView()],[])
  const plugins=useMemo(()=>[createDragPlugin({enableCreate:true,enableDrag:true,enableResize:true,onEventDrop:event=>editRef.current?.(event),onEventResize:event=>editRef.current?.(event)}),createEventsPlugin(),createLocalizationPlugin({locales:[zh]})],[])
- const calendars=useMemo(()=>[...groups,{id:'draft-preview',name:'草案预览',color:'#286653'}].map(g=>({id:g.id,name:g.name,readOnly:['markers','draft-preview'].includes(g.id),isVisible:!hidden.includes(g.id),colors:{lineColor:g.color,eventColor:g.color+'20',eventSelectedColor:g.id==='draft-preview'?g.color:g.color+'35',textColor:g.color}})),[hidden])
- const rendered=useMemo(()=>calendarEventsWithPreview((data?.events||[]).filter(e=>!hidden.includes(e.calendar_group||calendarGroup(e.kind))&&(!search||e.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))),draftPreview).map(toDayFlowEvent),[data,search,hidden,draftPreview])
+ const calendars=useMemo(()=>[...groups,{id:'draft-preview',name:'草案预览',color:'#286653'},{id:'selection-preview',name:'正在新建',color:'#286653'}].map(g=>({id:g.id,name:g.name,readOnly:['markers','draft-preview','selection-preview'].includes(g.id),isVisible:!hidden.includes(g.id),colors:{lineColor:g.color,eventColor:g.color+(g.id==='selection-preview'?'40':'20'),eventSelectedColor:g.id==='draft-preview'?g.color:g.color+'35',textColor:g.color}})),[hidden])
+ const rendered=useMemo(()=>[...calendarEventsWithPreview((data?.events||[]).filter(e=>!hidden.includes(e.calendar_group||calendarGroup(e.kind))&&(!search||e.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))),draftPreview),...calendarSelectionPreview(editing?.fields)].map(toDayFlowEvent),[data,search,hidden,draftPreview,editing?.fields])
+ const previewEditor=useCallback(fields=>setEditing(current=>current?{...current,fields}:current),[])
  const restoreEvents=()=>{
   const app=appRef.current?.app;if(!app)return
   const existing=new Map(app.getAllEvents().map(event=>[event.id,event])),incoming=new Map(rendered.map(event=>[event.id,event]))
@@ -39,8 +41,8 @@ export default function DayFlowWorkspace({workspace,today,active,refreshVersion,
   if(add.length||remove.length||update.length)app.applyEventsChanges({delete:remove,add,update},false,'remote')
  }
  function editEvent(event,created=false){
-  if(event.meta?.source?.kind==='draft_preview'){restoreEvents();return}
-  if(latest.current.editing)return
+  if(['draft_preview','calendar_selection'].includes(event.meta?.source?.kind)){restoreEvents();return}
+  if(latest.current.editing){restoreEvents();return}
   if(!latest.current.data){setNotice('日程尚未加载，请稍后重试。');restoreEvents();return}
   const node=[...(surface.current?.querySelectorAll('[data-event-id]')||[])].find(node=>node.dataset.eventId===event.id)
   const anchor=created?pointerAnchor.current:node?.getBoundingClientRect()||pointerAnchor.current
@@ -56,7 +58,7 @@ export default function DayFlowWorkspace({workspace,today,active,refreshVersion,
     if(a>='2000-01-01'&&b<='2101-01-01'&&a<b&&Date.parse(b)-Date.parse(a)<=370*86400000)setRange(previous=>previous.start===a&&previous.end===b?previous:{start:a,end:b})
    },onEventClick:event=>{
     const source=event.meta?.source
-    if(source?.kind==='draft_preview')return
+    if(['draft_preview','calendar_selection'].includes(source?.kind))return
     if(source?.task_id&&onOpenTask){onOpenTask(source.task_id);return}
     editEvent(event)
    },onEventCreate:event=>editEvent(event,true),onEventUpdate:event=>editEvent(event),
@@ -88,11 +90,11 @@ export default function DayFlowWorkspace({workspace,today,active,refreshVersion,
  },[today,realtime])
  useEffect(()=>{
   if(!active||!draftPreview?.focusAt)return
-  const date=toDatetimeLocalValue(draftPreview.focusAt).slice(0,10)
+  const date=previewDay
   if(!date)return
   setDay(date);setMiniDate(date);setView('day');setRange(calendarRange(date,'day'))
   calendar.changeView('day');calendar.selectDate(navigationDate(date))
- },[active,draftPreview?.key,draftPreview?.focusAt])
+ },[active,draftPreview?.key,previewDay])
  useEffect(()=>{
   if(!active||!['day','week'].includes(view))return
   let frame,attempts=0
@@ -101,7 +103,12 @@ export default function DayFlowWorkspace({workspace,today,active,refreshVersion,
    if(scroller&&scroller.clientHeight>0&&scroller.scrollHeight>scroller.clientHeight){
     const focus=toDatetimeLocalValue(draftPreview?.focusAt)
     const hour=focus?.slice(0,10)===day?Number(focus.slice(11,13))+Number(focus.slice(14,16))/60:8
-    scroller.scrollTop=Math.max(0,hour-1)*72;return
+    const top=hour*72
+    // Small time edits should move the block in place. Follow larger jumps
+    // only when the edited start would otherwise leave the visible calendar.
+    if(!focus||top<scroller.scrollTop||top+36>scroller.scrollTop+scroller.clientHeight)
+     scroller.scrollTop=Math.max(0,hour-1)*72
+    return
    }
    if(++attempts<120)frame=requestAnimationFrame(position)
   }
@@ -149,6 +156,6 @@ export default function DayFlowWorkspace({workspace,today,active,refreshVersion,
    <div className="dayflow-canvas" aria-busy={loading}>{loading&&!data&&<span className="dayflow-loading" role="status">正在读取日程…</span>}<DayFlowCalendar calendar={calendar}/></div>
   </div>
   {data?.conflicts?.length>0&&<p className="helper">当前范围存在重叠事项，可点击查看并调整。</p>}
-  {editing&&<CalendarEditor initial={editing.fields} revision={editing.revision} source={editing.source} anchor={editing.anchor} onClose={closeEditor} onSaved={()=>{setRetry(x=>x+1);onDataChanged?.()}} onOpenTask={onOpenTask} onManageRules={onManageRules}/>}
+  {editing&&<CalendarEditor initial={editing.fields} revision={editing.revision} source={editing.source} anchor={editing.anchor} onClose={closeEditor} onSaved={()=>{setRetry(x=>x+1);onDataChanged?.()}} onOpenTask={onOpenTask} onManageRules={onManageRules} onPreview={previewEditor}/>}
  </section>
 }

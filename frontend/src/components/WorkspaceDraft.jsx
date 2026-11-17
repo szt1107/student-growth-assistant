@@ -13,9 +13,9 @@ import { shiftDate } from '../calendar.js'
 export const draftLabels={planning:'日程方案',breakdown:'任务拆解',profile:'档案修改',feedback:'执行反馈',review_record:'复盘记录'}
 export const draftEvent=()=>window.dispatchEvent(new Event('sga-drafts-changed'))
 const statusLabels={ready:'待审核',applied:'已保存',stale:'资料已变化',superseded:'已有更新版本',discarded:'已放弃',conflict:'存在冲突',needs_input:'需要补充信息',no_plan:'尚无完整方案'}
-const fieldLabels={title:'名称',description:'说明',duration_minutes:'预计分钟',deadline:'截止时间',motivation:'为什么重要',weekly_target:'每周目标',unit_label:'单位',name:'名称',actual_minutes:'实际投入分钟',remaining_minutes:'剩余分钟',reason:'原因',summary:'回顾摘要',conclusion:'我的结论',next_steps:'下一步（可空）',priority:'优先顺序',text:'参考说明',hours:'小时',start:'开始时间',end:'结束时间',due_date:'目标日期',metric_kind:'衡量方式',goal_type:'目标类型',enabled:'启用'}
+const fieldLabels={title:'名称',description:'说明',duration_minutes:'预计分钟',deadline:'截止时间',motivation:'为什么重要',weekly_target:'每周目标',unit_label:'单位',name:'名称',actual_minutes:'实际投入分钟',remaining_minutes:'剩余分钟',reason:'原因',summary:'回顾摘要',conclusion:'复盘小结',next_steps:'下一步（可空）',priority:'优先顺序',text:'参考说明',hours:'小时',start:'开始时间',end:'结束时间',due_date:'目标日期',metric_kind:'衡量方式',goal_type:'目标类型',enabled:'启用'}
 Object.assign(fieldLabels,{start_time:'开始时间',end_time:'结束时间',date:'指定日期',weekday:'星期',recurrence:'重复方式',kind:'时间类型',active:'启用规则'})
-const operationLabels={create_time_rule:'新增课程或保护时间',update_time_rule:'修改课程或保护时间',work_timer:'计时操作',record_feedback:'执行反馈建议',create_goal:'目标建议'}
+const operationLabels={create_time_rule:'新增课程或保护时间',update_time_rule:'修改课程或保护时间',work_timer:'计时操作',record_feedback:'执行反馈建议',create_goal:'目标建议',update_goal:'修改目标',create_category:'新增任务类别',update_category:'修改任务类别',create_preference_rule:'新增安排偏好',update_preference_rule:'修改安排偏好'}
 export function PreviewDetails({draft}){
   if(draft?.kind==='planning')return null
   return <>{draft?.unresolved?.map(note=><p className="recovery-note" key={note}>{note}</p>)}{draft?.notices?.filter((note,index,all)=>all.indexOf(note)===index).map(note=><p className="helper" key={note}>{note}</p>)}</>
@@ -74,13 +74,24 @@ export function PlanningFields({draft,content=draft.content,onChange,onSplit,spl
   </section>)}</>
 }
 
-function Fields({value,onChange}){
-  return <div className="form-grid">{Object.entries(value).map(([key,item])=>{
+function Fields({value,onChange,categories=[],operations=[]}){
+  const fields=value.op==='create_preference_rule'?{weekdays:null,...(!('category_ref' in value)?{category_key:null}:{}),...value}:value
+  return <div className="form-grid">{Object.entries(fields).map(([key,item])=>{
     if(key==='action'&&value.op==='work_timer')return <p key={key}>计时操作：{{start:'开始',pause:'暂停',resume:'继续',finish:'结束'}[item]}（不会自动完成任务）</p>
     if(key==='task_id')return <p key={key}>关联任务 #{item}</p>
     if(key==='id'&&value.op==='update_time_rule')return <p key={key}>时间规则 #{item}</p>
     if(key==='session_id'&&value.op==='work_timer')return <p key={key}>计时记录 #{item}</p>
-    if(['fields','parameters','settings','profile'].includes(key)&&item&&typeof item==='object')return <Fields key={key} value={item} onChange={next=>onChange({...value,[key]:next})}/>
+    if(['fields','parameters','settings','profile'].includes(key)&&item&&typeof item==='object')return <Fields key={key} value={item} categories={categories} operations={operations} onChange={next=>onChange({...value,[key]:next})}/>
+    if(key==='weekdays')return <fieldset key={key} className="col-span-full"><legend>适用星期</legend><div className="flex flex-wrap gap-3">{['一','二','三','四','五','六','日'].map((day,index)=><Label key={day} className="flex items-center gap-1"><Input type="checkbox" checked={item==null||item.includes(index+1)} onChange={event=>{
+      const selected=item||[1,2,3,4,5,6,7]
+      onChange({...value,weekdays:event.target.checked?[...selected,index+1].sort((a,b)=>a-b):selected.filter(n=>n!==index+1)})
+    }}/>{`周${day}`}</Label>)}</div></fieldset>
+    if(key==='category_key'||key==='category_ref')return <Label key={key}>适用类别<NativeSelect value={item||''} onChange={event=>{
+      const {category_key,category_ref,...rest}=value
+      const selected=event.target.value
+      onChange({...rest,[selected.startsWith('draftcat:')?'category_ref':'category_key']:selected||null})
+    }}><option value="">全部类别</option>{categories.map(category=><option key={category.key} value={category.key}>{category.name}{category.active?'':'（已停用）'}</option>)}{operations.filter(op=>op.op==='create_category').map(op=><option key={op.temp_ref} value={op.temp_ref}>{op.name}（新增）</option>)}</NativeSelect></Label>
+    if(key==='kind'&&['prefer_time','avoid_time','deadline_buffer','adjustment_mode','ai_note'].includes(item))return <p key={key}>偏好类型：{{prefer_time:'优先安排时段',avoid_time:'尽量避开时段',deadline_buffer:'截止缓冲',adjustment_mode:'安排取舍',ai_note:'参考说明'}[item]}</p>
     if(['metric_kind','goal_type','status','adjustment_mode','mode','priority'].includes(key)){
       const options=key==='metric_kind'?[['time','投入时长'],['count','次数'],['deliverable','成果物']]:key==='goal_type'?[['long_term','长期'],['stage','阶段']]:key==='status'?[['active','进行中'],['paused','暂停'],['completed','已完成'],['archived','归档']]:key==='priority'?(typeof item==='number'?[[1,'最优先'],[2,'重要'],[3,'保持推进']]:[['high','高'],['normal','普通'],['low','低']]):[['balanced','兼顾'],['preference','习惯优先'],['stable','稳定优先']]
       return <Label key={key}>{fieldLabels[key]||'安排取舍'}<NativeSelect value={item} onChange={e=>onChange({...value,[key]:typeof item==='number'?Number(e.target.value):e.target.value})}>{options.map(([v,label])=><option key={v} value={v}>{label}</option>)}</NativeSelect></Label>
@@ -88,7 +99,7 @@ function Fields({value,onChange}){
     if(key==='enabled'||key==='active')return <Label key={key}>{fieldLabels[key]||'启用'}<Input type="checkbox" checked={Boolean(item)} onChange={e=>onChange({...value,[key]:e.target.checked})}/></Label>
     if(key==='recurrence'||key==='kind'&&['course','protected'].includes(item))return <p key={key}>{fieldLabels[key]}：{{weekly:'每周',once:'单次',course:'课程',protected:'保护时间'}[item]}{key==='recurrence'?'（调整重复方式请继续告诉助手）':''}</p>
     if(key==='weekday')return <Label key={key}>星期<NativeSelect value={item??''} onChange={e=>onChange({...value,weekday:Number(e.target.value)})}>{['一','二','三','四','五','六','日'].map((day,i)=><option key={day} value={i+1}>星期{day}</option>)}</NativeSelect></Label>
-    if(key==='start_time'||key==='end_time'||key==='date')return <Label key={key}>{fieldLabels[key]}<Input type={key==='date'?'date':'time'} value={item||''} onChange={e=>onChange({...value,[key]:e.target.value})}/></Label>
+    if(['start_time','end_time','start','end','date'].includes(key))return <Label key={key}>{fieldLabels[key]}<Input type={key==='date'?'date':'time'} value={item||''} onChange={e=>onChange({...value,[key]:e.target.value})}/></Label>
     if(key==='outcome')return <Label key={key}>执行结果<NativeSelect value={item} onChange={e=>onChange({...value,[key]:e.target.value})}><option value="completed">完成</option><option value="partial">部分完成</option><option value="postponed">暂缓</option></NativeSelect></Label>
     if(!fieldLabels[key]||item&&typeof item==='object')return null
     const number=['duration_minutes','weekly_target','actual_minutes','remaining_minutes','hours'].includes(key)||typeof item==='number'
@@ -98,7 +109,7 @@ function Fields({value,onChange}){
 }
 
 export function ReviewFields({value,onChange,sidebar=false}){
-  return <><Label>标题<Input required maxLength={160} value={value.title} onChange={e=>onChange({...value,title:e.target.value})}/></Label>{[['summary','回顾摘要'],['conclusion','我的结论'],['next_steps','下一步（可空）']].map(([key,label])=><Label key={key}>{label}<Textarea aria-label={label} rows={sidebar?(key==='summary'?6:4):undefined} maxLength={key==='next_steps'?4000:6000} value={value[key]||''} onChange={e=>onChange({...value,[key]:e.target.value})}/></Label>)}</>
+  return <><Label>标题<Input required maxLength={160} value={value.title} onChange={e=>onChange({...value,title:e.target.value})}/></Label>{[['summary','回顾摘要'],['conclusion','复盘小结'],['next_steps','下一步（可空）']].map(([key,label])=><Label key={key}>{label}<Textarea aria-label={label} rows={sidebar?(key==='summary'?6:4):undefined} maxLength={key==='next_steps'?4000:6000} value={value[key]||''} onChange={e=>onChange({...value,[key]:e.target.value})}/></Label>)}</>
 }
 
 function ReviewPeriod({value}){
@@ -108,7 +119,7 @@ function ReviewPeriod({value}){
 function ReviewReading({value,label='已保存的复盘内容'}){
   return <article className="review-draft-reading" aria-label={label}>
     <header><h3>{value.title}</h3><ReviewPeriod value={value}/></header>
-    {[['summary','回顾摘要'],['conclusion','我的结论'],['next_steps','下一步']].map(([key,label])=><section key={key}><h4>{label}</h4><p className={!value[key]?'muted':undefined}>{value[key]||'未填写'}</p></section>)}
+    {[['summary','回顾摘要'],['conclusion','复盘小结'],['next_steps','下一步']].map(([key,label])=><section key={key}><h4>{label}</h4><p className={!value[key]?'muted':undefined}>{value[key]||'未填写'}</p></section>)}
   </article>
 }
 
@@ -117,10 +128,10 @@ export function DraftPreview({draft}){
   const content=draft.preview_content||draft.content
   if(draft.kind==='review_record')return <ReviewReading value={content} label="复盘草案预览"/>
   const sections={create_goal:'成长目标',update_goal:'成长目标',create_preference_rule:'安排偏好',update_preference_rule:'安排偏好',
-    create_category:'任务类别',create_time_rule:'课程与保护时间',update_time_rule:'课程与保护时间',record_feedback:'执行反馈',work_timer:'计时记录'}
+    create_category:'任务类别',update_category:'任务类别',create_time_rule:'课程与保护时间',update_time_rule:'课程与保护时间',record_feedback:'执行反馈',work_timer:'计时记录'}
   return <section className="v2-readonly-summary draft-result-preview" aria-label={`${draftLabels[draft.kind]}预览`}>
     <h3>{draftLabels[draft.kind]} · 草案</h3>
-    {(content?.operations||[]).map((op,index)=><article key={index}><h4>{sections[op.op]||'修改内容'}</h4><fieldset disabled className="[&_:disabled]:opacity-100"><Fields value={op}/></fieldset></article>)}
+    {(content?.operations||[]).map((op,index)=><article key={index}><h4>{sections[op.op]||'修改内容'}</h4><fieldset disabled className="[&_:disabled]:opacity-100"><Fields value={op} categories={draft.task_categories} operations={content.operations}/></fieldset></article>)}
   </section>
 }
 
@@ -220,7 +231,7 @@ export default function WorkspaceDraft({workspace,kind,id,onSaved,onClose,onPrev
   return <section className={`workspace-draft panel${review?' review-draft':''}`} aria-label="共享草案编辑器" data-status={draft?.status}><div className="section-heading"><h2>{draftLabels[kind]}{review?<Badge className="review-draft-status" role="status">{statusLabels[draft?.status]||'读取中'}</Badge>:(kind!=='planning'||draft?.status!=='conflict')&&<> · {statusLabels[draft?.status]||'读取中'}</>}</h2><Button className="button subtle" disabled={busy} onClick={()=>{if(dirty)setError('有未保存修改，请保存或保留缓存后再关闭。');else onClose?.()}}>关闭草案</Button></div>
     {error&&<Alert variant="destructive" role="alert">{error}</Alert>}<EditRecovery recovery={recovery} label="共享草案编辑"/>
     {kind==='planning'&&!dirty&&<PlanningProblems draft={draft}/>}
-    {remote&&<details open className="recovery-note"><summary>服务端最新内容（本地编辑仍保留）</summary>{kind==='review_record'?<ReviewReading value={remote.content}/>:<fieldset disabled>{kind==='planning'?<PlanningFields draft={remote}/>:<>{(remote.content.operations||[]).map((op,index)=><Fields key={index} value={op}/>)}</>}</fieldset>}<Button onClick={async()=>{if(await confirmAction('用服务端版本替换编辑器？本地内容请先保留对照。')){adopt(remote);setError('')}}}>读取服务器版本</Button></details>}
+    {remote&&<details open className="recovery-note"><summary>服务端最新内容（本地编辑仍保留）</summary>{kind==='review_record'?<ReviewReading value={remote.content}/>:<fieldset disabled>{kind==='planning'?<PlanningFields draft={remote}/>:<>{(remote.content.operations||[]).map((op,index)=><Fields key={index} value={op} categories={remote.task_categories} operations={remote.content.operations}/>)}</>}</fieldset>}<Button onClick={async()=>{if(await confirmAction('用服务端版本替换编辑器？本地内容请先保留对照。')){adopt(remote);setError('')}}}>读取服务器版本</Button></details>}
     {draft&&value?savedReview?<>
       <ReviewReading value={value}/>
       {draft.notices?.length>0&&<details className="review-draft-notices"><summary>整理说明</summary><PreviewDetails draft={draft}/></details>}
@@ -234,10 +245,10 @@ export default function WorkspaceDraft({workspace,kind,id,onSaved,onClose,onPrev
         kind==='review_record'?<><ReviewPeriod value={value}/><ReviewFields value={value} onChange={change} sidebar/></>:
         <>{(value.operations||[]).map((op,index)=>{
           const onChange=next=>change({...value,operations:value.operations.map((old,i)=>i===index?next:old)})
-          return <section className="draft-operation" key={index}><h3>{operationLabels[op.op] || '资料修改建议'}</h3><Fields value={op} onChange={onChange}/></section>
+          return <section className="draft-operation" key={index}><h3>{operationLabels[op.op] || '资料修改建议'}</h3><Fields value={op} categories={draft.task_categories} operations={value.operations} onChange={onChange}/></section>
         })}</>}
       </fieldset><div className={`button-row${review?' review-draft-actions':''}`}>{review&&confirmButton}{saveButton}{!review&&confirmButton}<Button className="button subtle" disabled={busy||draft.status==='applied'} onClick={()=>act('discard')}>放弃草案</Button></div>
-      {draft.receipt&&<p role="status">保存结果：已正式保存。{kind==='planning'?'任务与日程已刷新。':kind==='review_record'?'可在复盘记录中查看。':'可到对应页面查看。'}</p>}{kind!=='planning'&&<p className="helper">{draft.status==='applied'?'这份草案已经保存。如需调整，请基于最新正式记录生成新的草案。':review?'保存编辑仅暂存草案，确认后才存入复盘记录，不改变任务或日程。':'保存编辑仍是草案；只有确认后才写入正式业务。旧卡片与冲突版本无法直接执行。'}</p>}
+      {draft.receipt&&<p role="status">保存结果：已正式保存。{draft.calendar_record?'日历已更新，可在日程中继续编辑。':kind==='planning'?'任务与日程已刷新。':kind==='review_record'?'可在复盘记录中查看。':'可到对应页面查看。'}</p>}{kind!=='planning'&&<p className="helper">{draft.status==='applied'?'这份草案已经保存。如需调整，请基于最新正式记录生成新的草案。':review?'保存编辑仅暂存草案，确认后才存入复盘记录，不改变任务或日程。':'保存编辑仍是草案；只有确认后才写入正式业务。旧卡片与冲突版本无法直接执行。'}</p>}
     </>:loading?<p role="status">正在读取草案…</p>:<Button className="button secondary" onClick={()=>setReadRetry(v=>v+1)}>重试读取草案</Button>}
   </section>
 }

@@ -138,6 +138,16 @@ test('unknown primary page, auxiliary page, size or mobile surface cannot corrup
 const {default:WorkspaceShell}=await loadJsx(new URL('../src/components/WorkspaceShell.jsx',import.meta.url))
 const renderShell = state => renderToStaticMarkup(React.createElement(WorkspaceShell, { state, dispatch: () => {}, conversationContent: 'REAL_CONVERSATION_LIST', chat: 'CHAT', review: 'REVIEW', profile: 'PROFILE', clock: '演示 · 2026-10-14 18:00 北京时间' }, 'SCHEDULE'))
 
+test('all workspace pages expose one logout button in the shared footer', () => {
+  for (const navigation of ['home', 'schedule', 'review', 'profile']) {
+    const html = renderShell({ ...initialWorkbench, navigation })
+    const footer = html.slice(html.indexOf('<footer class="v2-session-actions">'))
+    assert.match(footer, /<button[^>]*type="button"[^>]*>注销<\/button>/)
+    assert.equal((html.match(/>注销<\/button>/g) || []).length, 1)
+    assert.doesNotMatch(footer, /hidden=""|inert=""/)
+  }
+})
+
 test('shell exposes exactly three linked tabs, real current conversation and honest unavailable controls', () => {
   const html = renderShell(initialWorkbench)
   assert.equal((html.match(/role="tab"/g) || []).length, 3)

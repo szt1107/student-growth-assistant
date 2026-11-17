@@ -26,7 +26,9 @@ export function planningCalendarPreview(draft,asOf) {
   if(draft?.kind!=='planning'||!editableDraft(draft))return null
   const events=planningTaskFields(draft,draft.preview_content||draft.content).flatMap((task,index)=>{
     const windows=task.split_enabled?task.work_segments:[{start_at:task.start_at,end_at:task.end_at}]
-    return windows.filter(window=>Number.isFinite(Date.parse(window.start_at))&&Date.parse(window.end_at)>Date.parse(window.start_at)&&!(Date.parse(window.start_at)<Date.parse(asOf)))
+    // Local edits may turn a future proposal into a past calendar record. Keep
+    // projecting the edited interval; saving still performs server validation.
+    return windows.filter(window=>Number.isFinite(Date.parse(window.start_at))&&Date.parse(window.end_at)>Date.parse(window.start_at))
       .map((window,part)=>({id:`draft-preview:${draft.id}:${index}:${part}`,kind:'draft_preview',calendar_group:'draft-preview',
         title:`${task.title||'任务'} · 草案`,start:window.start_at,end:window.end_at,ref:task.ref,allDay:false}))
   }).sort((a,b)=>Date.parse(a.start)-Date.parse(b.start))
@@ -243,9 +245,8 @@ export function editPlanningTask(draft, content, index, patch) {
       profile:{...action.fields.profile,fixed_start:start,allowed_windows:windows},
     }
   } else if (Object.hasOwn(patch,'duration_minutes') && patch.duration_minutes!==task.duration_minutes && task.time_edited && action.fields.profile?.allowed_windows?.length) {
-    const day=toDatetimeLocalValue(task.start_at).slice(0,10)
     fields.profile = {...action.fields.profile,allowed_windows:[{
-      start_at:toBackendDeadline(`${day}T08:00`),end_at:toBackendDeadline(`${day}T22:00`),
+      start_at:task.start_at,end_at:addPlanningMinutes(task.start_at,patch.duration_minutes+task.gap_minutes),
     }],min_block_minutes:5}
   }
   actions[actionIndex] = {...action,fields}

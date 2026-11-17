@@ -26,6 +26,7 @@ from . import workspace_drafts
 from . import ai_skills
 from . import ai_diagnostics as trace
 from .assistant_clock import assistant_now
+from .conversation_progress import record as record_progress
 
 logger=logging.getLogger(__name__)
 RUNTIME_PROTOCOL='chat-capabilities-v4'
@@ -72,7 +73,8 @@ def execution_receipt(results, previous):
         problems=[problem for problem in draft.get('problems',[]) if not (
             problem['code']=='DEADLINE_REQUIRED' and value and any(
                 item['ref']==draft.get('schedule_target') for item in draft.get('items',[])))]
-        lines.extend(draft.get('schedule_adjustments',[]))
+        if draft.get('schedule_adjustments'):
+            lines.append('已根据可用空档调整了建议起点。')
         action='已生成可编辑的' if old is None else '已更新同一份' if old['version']!=draft['version'] else '已读取当前'
         if status=='applied':lines.append(f'当前{labels[kind]}已采用，本轮没有重复保存。');continue
         lines.append(f'{action}{labels[kind]}。')
@@ -81,6 +83,8 @@ def execution_receipt(results, previous):
             tasks=draft.get('task_details',[])
             if value:tasks=[{'ref':draft.get('schedule_target'),**value}]
             for task in tasks:
+                if draft.get('field_sources', {}).get('duration_minutes') == 'ai_interpretation':
+                    lines.append(f"预计时长按你的描述估计为{task['duration_minutes']}分钟，可在草案中调整。")
                 items=[item for item in draft.get('items',[]) if item['ref']==task['ref']]
                 times=[]
                 for item in items:
@@ -102,25 +106,20 @@ def execution_receipt(results, previous):
             if status in ('stale','superseded','discarded'):lines.append('这份草案当前不可采用，请重新读取最新状态。')
             elif status in ('conflict','no_plan'):lines.append('当前方案存在冲突或未找到可行安排，尚不能确认采用。')
             if not draft.get('problems'):lines.extend(draft.get('unresolved',[]))
-            if kind!='planning':lines.extend(draft.get('notices',[]))
     for result in results:
         if result.get('memory') and not result.get('error'):lines.append('已提出待审核的记忆建议，确认后才参与长期参考。')
         if result.get('error') and not result.get('recovered_by'):
             lines.append('本次操作未完成：'+result.get('message','工具执行失败，请核对后重试。'))
     if not lines:return None
-    complete_schedule=drafts and all(d['kind']=='planning' and
-        all(d.get('field_sources',{}).get(key)=='user_explicit' for key in ('title','day','duration_minutes')) and
-        d.get('field_sources',{}).get('start_time') in ('user_explicit','schedule_adjusted') for d in drafts)
-    if any(r.get('fallback') for r in results) and not complete_schedule:
-        lines.append('模型处理未完成，初稿使用了已知信息与标注的默认值。')
     if any(d['status']!='applied' for d in drafts):lines.append('请查看草案，确认后才会保存。')
     elif not drafts:lines.append('本轮没有修改正式任务或日程。')
     return '\n'.join(dict.fromkeys(lines))
-PLANNER='''当前是工具选择阶段，不是面向用户的回答阶段。自然交流规范用于最终回答，此阶段严格只返回符合schema的JSON对象，不输出解释或对话。只能选择allowed_tools。
+PLANNER='''先结合本轮、必要前文和真实工具结果分析用户意图，计算可由已知信息推导的日期、起止时间与时长，再选择工具并填写结构化字段。当前阶段只返回符合schema的JSON对象，面向用户的解释由结果回复承担。只能选择allowed_tools。
 无需工具时输出 {"calls":[],"questions":[],"continue_after_read":false}。查询示例：{"calls":[{"name":"tasks","arguments":{}}],"questions":[],"continue_after_read":false}。
 tasks/goals/memories使用lookup_schema的id/q/offset/limit；calendar/review使用start,end（上海日期，end不含）。日期工具优先按tool_schemas中的工具名查对应契约，不混用查询和草案字段。
 attention无参数，复用真实优先处理/空闲时段计算；time_rules使用lookup_schema查询课程和保护时间；task_execution使用lookup_schema，指定真实任务id读取反馈和计时状态，不带id查询当前活动计时。问先做什么先查attention；不能凭聊天猜优先级。课程规则不是普通记忆，profile_draft支持create_time_rule/update_time_rule。执行进度用feedback_draft，计时用其中work_timer。查询结果才能确定id时先读并continue_after_read=true，重名须询问，不猜id。
 planning_draft使用planning_schema；breakdown_draft使用breakdown_schema；review_draft使用review_schema。
+完整起止时段包含开始、结束和可计算时长，例如“七点半到八点进行升旗仪式”应理解为名称“升旗仪式”、07:30开始、30分钟、08:00截止。用planning_draft.actions传递语义分析和计算结果，勿因用户没有逐字段填写而全部退回默认。明确日期钟点已经过去时生成可确认的日历补录草案，保留原日期和时段。只在真实矛盾或关键歧义时追问。
 明确日期或星期必须按context.now换算为上海日期，并使用profile.allowed_windows限定在该日期。用户指定上午、中午、下午、晚上时，分别将允许窗口限定为06:00–12:00、12:00–14:00、14:00–18:00、18:00–24:00；schedule_preview使用time_period保留这一要求。8点、12点、14点、19点是各时段的默认建议起点；未指定时间默认08:00，全天00:00–24:00均可安排，遇课程或正式占用后在同一时段内寻找完整空档。用户明确说几点开始就使用fixed_start或start_exact，不要求额外说“必须”；只有用户说左右、可以调整等才作为灵活建议。明确钟点优先于宽泛时段。指定时段放不下时返回具体原因，等待用户调整时段，不能自动换到晚上或另一天。preferred_windows用于允许窗口内的钟点偏好。不得因旧截止时间或旧安排换到另一天，不得自行延后已有截止时间。用户要求日期与真实截止时间矛盾时，保留两者并报告具体矛盾。只有用户明确要修改同一任务时才复用旧任务，不把同名的另一日活动自动当作旧任务修改。
 完整的新活动请求默认生成本次活动草案，同名旧任务不构成用户身份授权，不能继承其截止、锁定和时段限制。未给截止就留空，不虚构截止或要求用户修改无关旧任务。当前用户日期、开始时间和时长优先，无占用时采用原要求。指定钟点有真实占用时保留原时间并说明具体冲突，等待用户选择；不得静默改动。名称从用户描述的真实活动提取，不限于学习任务，例如“进行升旗仪式”命名为“升旗仪式”，“半个小时”为30分钟。
 profile_draft/feedback_draft使用operations，遵守business_operations。edit_draft只引用已协调的current_drafts及kind/id/version/content，保留用户其它编辑。
@@ -161,7 +160,9 @@ async def plan(request):
             'update_time_rule':'op, id from time_rules, fields matching time_rule_patch_schema；停用用active:false',
             'work_timer':'feedback_draft中op:work_timer,task_id,action:start|pause|resume|finish；非start还须session_id=timer.id及expected_updated_at=timer.updated_at；查询无id时从active_timers中取同样字段。停止不表示任务完成',
             'record_feedback':'op, task_id plus feedback_schema fields except client_action_id (server generated)',
-            'create_preference_rule':{'fields':'op, name, description?, kind, category_key?, weekdays?, parameters',
+            'create_category':'op, name, temp_ref (unique draftcat: prefix). Reuse context.categories keys when the category exists. No formal write until confirmation.',
+            'update_category':'op, key from context.categories, fields with name? and active?',
+            'create_preference_rule':{'fields':'op, name, description?, kind, category_key? OR category_ref? (temp_ref of create_category in the same draft), weekdays? (Monday=1..Sunday=7), parameters',
                 'parameters':{'prefer_time':'{start:HH:MM,end:HH:MM}','avoid_time':'{start:HH:MM,end:HH:MM}','deadline_buffer':'{hours:integer 0..72}','adjustment_mode':'{mode:balanced|preference|stable}','ai_note':'{text:string}' }},
             'update_preference_rule':'op, id, fields containing supported create_preference_rule fields or enabled',
             'set_preferences':'op, settings matching preference_patch_schema'},
@@ -172,7 +173,7 @@ async def plan(request):
         value,sources=draft_defaults.schedule({'message':request['message']},assistant_now())
         data.update(history=[],current_drafts=[],scheduling_intent={
             'kind':'new_activity','user_fields':value.model_dump(mode='json'),'field_sources':sources})
-        system+='\n本轮服务端已识别为独立新活动，日期、开始时间、时长来自当前用户。调用planning_draft生成本次草案，不引用同名旧任务或历史草案的截止，不询问是否另建活动或延后旧截止。用户未提供截止时留空，真实占用由排程工具检查并推荐合法时间。'
+        system+='\n本轮服务端已识别为独立新活动，字段来源见field_sources；默认或模型建议的起点不是用户固定钟点。调用planning_draft生成本次草案，不引用同名旧任务或历史草案的截止。明确起止时段可推导时长与截止，过去时段可补录日历。仅有开始和时长时不虚构硬截止，真实占用由工具检查。'
     data['tool_schemas']={name:contract for name,contract in {
         'calendar':data['range_schema'],'review':data['range_schema'],
         'review_draft':data['review_schema'],'time_rules':data['lookup_schema'],
@@ -230,7 +231,7 @@ def refs_for(db,conversation):
 def persist(engine,rid,token,**values):
     with Session(engine) as db,planning_transaction(db):
         run=db.get(AssistantRun,rid)
-        if not run or run.payload.get('token')!=token:return False
+        if not run or run.status!='running' or run.payload.get('token')!=token:return False
         run.payload={**run.payload,**values}
         output=db.get(AssistantMessage,run.payload['assistant_message_id'])
         links=[*output.content.get('links',[]),*({**link,'source':'tool'} for result in run.payload.get('tool_results',[]) for link in result.get('links',[]))]
@@ -333,9 +334,9 @@ async def execute(db,run,call,index,*,fallback=False):
             'links':[{'page':'schedule','kind':'task','id':r.id,'label':'查看任务 '+r.title} for r in rows[:3]] if name=='tasks' else []}
     if name=='preferences':
         if args:error('INVALID_TOOL','偏好查询不接收额外参数。',422)
-        from .taxonomy import rules_payload
+        from .taxonomy import rules_payload, categories_payload
         from .assistant_state import preference_settings
-        return {'items':rules_payload(db)[:30],'settings':preference_settings(db)['settings']}
+        return {'items':rules_payload(db)[:30],'categories':categories_payload(db),'settings':preference_settings(db)['settings']}
     if name=='memory_suggestion':
         if not any(word in run.text for word in ('记住','以后','长期','偏好','习惯','一直')):
             error('MEMORY_EXPLICIT_INTENT_REQUIRED','临时表达不生成长期记忆；请明确说明希望以后记住什么。',422)
@@ -361,6 +362,7 @@ async def execute(db,run,call,index,*,fallback=False):
         db.rollback();result=await create_draft(db,request)
         return {'draft':{'kind':'breakdown','id':result.id},'summary':result.content.parent.title,'status':result.status}
     if name=='planning_draft':
+        PlanningArgs.model_validate(args)
         if 'actions' in args and (not isinstance(args['actions'],list) or any(not isinstance(a,dict) or not isinstance(a.get('fields',{}),dict) for a in args['actions'])):
             PlanningArgs.model_validate(args)
         from .conversation_context import context_for
@@ -385,7 +387,10 @@ async def execute(db,run,call,index,*,fallback=False):
             base=previews[0] if previews else None
             if base and not any(r['kind']=='planning' and r['id']==base['id'] and r['version']==base['version'] for r in run.payload.get('draft_versions',[])):
                 error('DRAFT_COORDINATION_REQUIRED','请先读取最新草案并协调未保存编辑，再继续修改。')
-            result=await asyncio.to_thread(create,db,run,request,key,tool_session,base_ref=base)
+            actions = args.get('actions', [])
+            interpreted_fields = actions[0].get('fields') if len(actions) == 1 and actions[0].get('op') == 'add' else None
+            result=await asyncio.to_thread(create,db,run,request,key,tool_session,base_ref=base,
+                interpreted_fields=None if fallback else interpreted_fields)
             value=result['content']['schedule']
             trace.record('planning_draft.persisted',draft_id=result['id'],status=result['status'],
                 defaults_applied=sorted(k for k,v in result['field_sources'].items() if v=='system_default'),
@@ -438,7 +443,8 @@ async def execute(db,run,call,index,*,fallback=False):
         existing=db.scalar(select(GrowthChangeDraft).where(GrowthChangeDraft.payload['tool_key'].as_string()==key))
         if existing:return {'draft':{'kind':kind,'id':existing.id},'summary':'已恢复原草案'}
         session=tool_session(db,run.session_id,'profile' if kind=='profile' else 'review')
-        labels={'create_time_rule':'新增课程或保护时间','update_time_rule':'调整课程或保护时间','work_timer':'计时操作','record_feedback':'记录执行情况'}
+        labels={'create_time_rule':'新增课程或保护时间','update_time_rule':'调整课程或保护时间','work_timer':'计时操作','record_feedback':'记录执行情况',
+            'create_category':'新增任务类别','update_category':'调整任务类别','create_preference_rule':'新增安排偏好','update_preference_rule':'调整安排偏好','create_goal':'新增成长目标','update_goal':'调整成长目标'}
         summary='；'.join(dict.fromkeys(labels.get(op.get('op'),'资料修改') for op in values.operations))
         draft=GrowthChangeDraft(session_id=session.id,scope=session.scope,status='ready',source_revision=revision(db),
             payload={'operations':values.operations,'tool_key':key,'reply':summary,'changes':[]})
@@ -547,6 +553,7 @@ async def prepare(engine,rid,token,request):
                 if index<len(previous):results.append(previous[index]);continue
                 if run.status!='running' or run.payload.get('token')!=token:return None
                 run.phase='querying' if call.name in ai_skills.READ_TOOLS else 'calculating'
+                record_progress(run,db.get(AssistantMessage,run.payload['assistant_message_id']),run.phase)
                 db.commit()
                 try:
                     if call.name.endswith('_draft') and revision(db)!=snapshot:error('STALE_DRAFT','读取期间资料已变化，请重新核对。')
@@ -598,19 +605,31 @@ async def prepare(engine,rid,token,request):
     # Last resort uses only verified user input and code-owned defaults. Never
     # feed malformed model text into a business service. It consumes a tool slot.
     forbidden={'TOOL_NOT_ALLOWED','DRAFT_COORDINATION_REQUIRED','DRAFT_VERSION_CONFLICT','STALE_DRAFT','STALE_CANDIDATE','DRAFT_STORAGE_FAILED'}
-    if selection.expected in ('planning','review_record') and not ai_skills.fulfilled(selection,results) and len(results)<4 and not any(r.get('error') in forbidden for r in results):
-        name='planning_draft' if selection.expected=='planning' else 'review_draft'
+    fallback_call=None
+    if selection.expected=='profile' and not ai_skills.fulfilled(selection,results) and selection.reason!='draft_followup' and not any(d['kind']=='profile' and d['status']!='applied' for d in request['current_drafts']):
+        from .profile_drafts import preference_operations
+        with Session(engine) as db:
+            operations=preference_operations(db,request)
+        if operations:fallback_call=ToolCall(name='profile_draft',arguments={'operations':operations})
+    if selection.expected in ('planning','review_record'):
+        fallback_call=ToolCall(name='planning_draft' if selection.expected=='planning' else 'review_draft')
+    if fallback_call and not ai_skills.fulfilled(selection,results) and len(results)<4 and not any(r.get('error') in forbidden for r in results):
+        name=fallback_call.name
         with Session(engine) as db:
             run=db.get(AssistantRun,rid)
             if run.status!='running' or run.payload.get('token')!=token:return None
+            record_progress(run,db.get(AssistantMessage,run.payload['assistant_message_id']),'calculating')
+            db.commit()
             try:
                 if revision(db)!=snapshot:error('STALE_DRAFT','正式资料已变化，请重新读取。')
-                result=await execute(db,run,ToolCall(name=name),len(results),fallback=True)
+                result=await execute(db,run,fallback_call,len(results),fallback=True)
                 if 'draft' in result:
                     ref=result['draft'];result['draft']=workspace_drafts.envelope(db,ref['kind'],ref['id'])
-                results.append(jsonable_encoder({'tool':name,**result,'fallback':'trusted_defaults','cause':request.get('planner_failure','INCOMPLETE_PLAN')}))
+                fallback_source='user_preference' if name=='profile_draft' else 'trusted_defaults'
+                results.append(jsonable_encoder({'tool':name,**result,'fallback':fallback_source,'cause':request.get('planner_failure','INCOMPLETE_PLAN')}))
                 for earlier in results[:-1]:
-                    if earlier.get('error') in ('INVALID_TOOL_ARGUMENTS','AI_RESPONSE_INVALID','AI_UNAVAILABLE','AI_RATE_LIMITED'):earlier['recovered_by']='trusted_defaults'
+                    if earlier.get('error') in ('INVALID_TOOL_ARGUMENTS','AI_RESPONSE_INVALID','AI_UNAVAILABLE','AI_RATE_LIMITED') or name=='profile_draft' and earlier.get('error')=='INVALID_DRAFT':
+                        earlier['recovered_by']=fallback_source
                 request['tool_questions']=[]
                 request['execution_notice']='已使用已知信息与标注的默认值生成可编辑初稿，尚未保存正式修改。请打开最新草案检查；你也可以继续聊天修改。'
             except HTTPException as exc:

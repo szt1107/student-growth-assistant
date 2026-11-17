@@ -31,7 +31,9 @@ def editable_schedule(db, row):
     """Recover legacy clock intent without rewriting the stored draft on reads."""
     value = dict(row.payload['preview_input'])
     policy = row.payload.get('start_policy_version', 0)
-    if policy >= 4 or row.status in ('applied', 'discarded'):
+    if policy >= 6 or row.status in ('applied', 'discarded'):
+        return value
+    if policy >= 4 and row.payload.get('edit_receipt'):
         return value
     key = row.payload.get('preview_edit_receipt', {}).get('key') or row.payload.get('preview_key', '')
     parts = key.split(':')
@@ -41,7 +43,21 @@ def editable_schedule(db, row):
             AssistantMessage.role == 'user', AssistantMessage.id <= run.payload['user_message_id'])
             .order_by(AssistantMessage.id.desc()).limit(12)).all()
         for text in messages:
-            parsed = draft_defaults.user_values(text, assistant_clock.assistant_now())
+            reference_day = datetime.fromisoformat(str(value['day'])).date()
+            historical_now = run.created_at.astimezone(assistant_clock.SHANGHAI)
+            parsed = draft_defaults.user_values(text, historical_now, reference_day=reference_day)
+            if policy == 5:
+                origins=row.payload.get('field_sources',{})
+                if parsed.get('time_period') and 'start_exact' not in parsed:
+                    value['start_exact']=False;value['time_period']=parsed['time_period']
+                elif origins.get('start_exact')=='ai_interpretation' and 'start_exact' not in parsed:
+                    value['start_exact']=False
+                if parsed.get('title') and origins.get('title')=='user_explicit':value['title']=parsed['title']
+                break
+            if policy == 4:
+                for field in ('title', 'duration_minutes', 'deadline', 'start_time', 'start_exact', 'time_period'):
+                    if field in parsed:
+                        value[field] = parsed[field]
             if policy < 4:
                 origins = row.payload.get('field_sources', {})
                 for field in ('title', 'duration_minutes'):
@@ -126,6 +142,8 @@ def problems(db, row, status):
     if row.source_revision != revision(db):
         return [dict(code='SOURCE_CHANGED', message='日程或任务在这份草案生成后有了变化。',
             suggestion='请让 AI 按最新日程重新生成草案，再确认采用。')]
+    if payload.get('calendar_record'):
+        return payload.get('calendar_problems', [])
     result = []
     if value.title == '待命名任务':
         result.append(dict(code='TITLE_REQUIRED', message='这项任务还没有名称。', suggestion='请填写“名称”，再保存草案。'))
@@ -237,9 +255,10 @@ def problems(db, row, status):
 
 def calculate(db, session, value, sources, target):
     now=assistant_clock.assistant_now();week=session.week_start
-    if not week<=value.day<week+timedelta(days=14):
-        error('OUTSIDE_PLANNING_WINDOW','初稿日期须在本周与下周；不会自动改到其他日期。',422)
     start=datetime.combine(value.day,time.fromisoformat(value.start_time),assistant_clock.SHANGHAI)
+    calendar_record = value.start_exact and start < now and not value.task_id
+    if not calendar_record and not week<=value.day<week+timedelta(days=14):
+        error('OUTSIDE_PLANNING_WINDOW','初稿日期须在本周与下周；不会自动改到其他日期。',422)
     period_start,end=draft_defaults.day_window(value.day,value.time_period)
     if value.time_period and any(window.start_at<period_start or window.end_at>end for window in value.work_segments):
         error('INVALID_DRAFT','分段时间超出所选日期或时段，请先明确修改时段要求。',422)
@@ -273,9 +292,12 @@ def calculate(db, session, value, sources, target):
             fields['deadline']=max(end,value.work_segments[-1].end_at).isoformat()
     payload=build_proposal(db,week,[action],preferences=prefs,include_unplanned=False)
     payload['preview_input']=value.model_dump(mode='json')
-    payload['start_policy_version']=4
+    payload['start_policy_version']=6
     payload['field_sources']=dict(sources)
     payload['schedule_adjustments']=[]
+    if calendar_record:
+        from .calendar_drafts import prepare_record
+        return prepare_record(db, payload, value, target)
     assigned=sorted((x for x in payload['items'] if x['ref']==target),key=lambda x:x['start_at'])
     if assigned and value.segments>1:
         payload['preview_input']['work_segments']=[{'start_at':item['start_at'],'end_at':item['end_at']} for item in assigned]
@@ -312,7 +334,7 @@ def calculate(db, session, value, sources, target):
     return payload
 
 
-def create(db, run, request, key, session_factory, *, base_ref=None):
+def create(db, run, request, key, session_factory, *, base_ref=None, interpreted_fields=None):
     from . import workspace_drafts
     now=assistant_clock.assistant_now()
     run_token=run.payload.get('token')
@@ -332,7 +354,7 @@ def create(db, run, request, key, session_factory, *, base_ref=None):
         base=editable_schedule(db,row);sources=row.payload['field_sources']
     saved=preference_settings(db)
     value,origins=draft_defaults.schedule(request,now,base=base,sources=sources,
-        preferences=None if saved['is_sample'] else saved['settings'])
+        preferences=None if saved['is_sample'] else saved['settings'], interpreted_fields=interpreted_fields)
     independent=not base and draft_defaults.independent_schedule(request['message'],now)
     matches=db.scalars(select(Task).where(Task.title==value.title,Task.task_kind=='executable')).all() if not value.task_id and not independent else []
     if len(matches)>1:error('AMBIGUOUS_TASK','存在多个同名正式任务，请先在工作区选择具体任务。',422)

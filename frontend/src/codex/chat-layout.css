@@ -12,6 +12,17 @@
 .compact-shell.v2-shell .aui-thread .safe-message pre { max-width:100%;box-sizing:border-box;white-space:pre;overflow:auto }
 .compact-shell.v2-shell .aui-thread .safe-message pre code { white-space:pre;overflow-wrap:normal }
 .compact-shell.v2-shell .conversation-chat .aui-footer { position:static;flex:0 0 auto;max-width:720px;padding-top:12px }
+.compact-shell.v2-shell .conversation-chat .reply-status { width:100%;max-width:720px;margin:0 auto }
+.compact-shell.v2-shell .conversation-chat .new-reply { right:max(44px,calc((100% - 720px)/2 + 33px));transform:translateX(50%);bottom:10px }
+.conversation-progress { margin:0 0 12px;color:var(--sga-muted-foreground,#586c62);font-size:13px;line-height:1.65 }
+.conversation-progress>summary { display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;width:fit-content;max-width:100%;padding:5px 0 }
+.conversation-progress>summary::before { content:'›';font-size:18px;transition:transform .15s }
+.conversation-progress[open]>summary::before { transform:rotate(90deg) }
+.conversation-progress .progress-toggle { font-size:12px;opacity:.7;white-space:nowrap }
+.conversation-progress-body { border-left:2px solid var(--sga-border);margin:6px 0 0 5px;padding:2px 0 2px 14px }
+.conversation-progress-body ol { margin:0;padding-left:18px }
+.conversation-progress-body p { margin:6px 0 }
+.conversation-progress-body [data-state=running] { color:var(--sga-primary) }
 .compact-shell.v2-shell .conversation-chat .conversation-review-action { width:100%;max-width:720px;margin:4px auto 0;font-size:12px }
 @media(max-width:600px){
  .compact-shell.v2-shell .aui-thread .chat-scroll { padding:12px 0 20px;gap:16px }

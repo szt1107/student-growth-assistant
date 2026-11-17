@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timedelta
 from hashlib import sha256
 from typing import Literal
 import json
+import re
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -61,7 +62,7 @@ def projected_entries(db,a,b,entries=None):
         start=e.start_at.astimezone(SHANGHAI).date().isoformat() if e.all_day else e.start_at.isoformat(),
         end=e.end_at.astimezone(SHANGHAI).date().isoformat() if e.all_day else e.end_at.isoformat(),
         allDay=e.all_day,kind='calendar',blocks_time=e.blocks_time,
-        busy_start=e.start_at.isoformat(),busy_end=e.end_at.isoformat(),source='单次调整' if e.source_key else '手动日程',
+        busy_start=e.start_at.isoformat(),busy_end=e.end_at.isoformat(),source='草案补录' if (e.source_key or '').startswith('planning-draft:') else '单次调整' if e.source_key else '手动日程',
         source_rule_id=e.source_rule_id) for e in rows]
 
 
@@ -93,6 +94,10 @@ def validate_calendar_backup(tables):
             expected_revision=0,client_request_id='backup-validation')
         if row['source_key'] is None:
             if row['source_rule_id'] is not None or row['source_date'] is not None:raise ValueError('incomplete source')
+        elif row['source_key'].startswith('planning-draft:'):
+            if (not re.fullmatch(r'planning-draft:[1-9][0-9]*:(?:0|[1-9][0-9]*)', row['source_key'])
+                    or row['source_rule_id'] is not None or row['source_date'] is not None):
+                raise ValueError('invalid planning draft source')
         else:
             prefix,rid,stamp=row['source_key'].split(':',2)
             stamp=datetime.fromisoformat(stamp)
@@ -132,6 +137,21 @@ def original_event(db,key):
     except (ValueError,AttributeError):
         error('INVALID_EVENT','事项标识无效。',422)
     error('CALENDAR_READ_ONLY','此节点来自任务截止或目标，请到对应任务／档案中修改。',422)
+
+
+def validate_calendar_conflicts(db, start, end, event_id=None):
+    """Check the same occupied facts for manual edits and chat drafts."""
+    from ..services.workspace_views import calendar_events
+    finish = (end - timedelta(microseconds=1)).date() + timedelta(days=1)
+    snapshot = calendar_events(db, start.date(), finish)
+    for event in snapshot['events']:
+        if event['id'] == event_id or event.get('blocks_time') is False:
+            continue
+        if event['allDay'] and event['kind'] != 'calendar':
+            continue
+        begin, finish = parse_interval(event['start'], event['end'], event['allDay'])
+        if start < finish and begin < end:
+            error('CALENDAR_CONFLICT', f'与“{event["title"]}”时间重叠，请调整后保存。', 409)
 
 
 @router.post('/changes')
@@ -184,15 +204,7 @@ def change_calendar(payload:CalendarChange,db:Session=Depends(get_db)):
                     if windows and not any(datetime.fromisoformat(w['start_at'])<=start and end<=datetime.fromisoformat(w['end_at']) for w in windows):
                         error('TASK_WINDOW','安排超出任务允许的时段。',422)
             if payload.blocks_time:
-                from ..services.workspace_views import calendar_events
-                # Query all days touched, including cross-midnight busy events.
-                finish=(end-timedelta(microseconds=1)).date()+timedelta(days=1)
-                snapshot=calendar_events(db,start.date(),finish)
-                for event in snapshot['events']:
-                    if event['id']==payload.event_id or event.get('blocks_time') is False:continue
-                    if event['allDay'] and event['kind']!='calendar':continue
-                    a,b=parse_interval(event['start'],event['end'],event['allDay'])
-                    if start<b and a<end:error('CALENDAR_CONFLICT',f'与“{event["title"]}”时间重叠，请调整后保存。',409)
+                validate_calendar_conflicts(db, start, end, payload.event_id)
         else:
             start,end=old_start,old_end
         if prefix=='plan':

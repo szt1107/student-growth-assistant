@@ -16,6 +16,7 @@ from . import ai_diagnostics as trace
 from .assistant_clock import assistant_now
 from .conversations import require_conversation, error, automatic_title
 from .planning_state import planning_transaction
+from .conversation_progress import record as record_progress
 
 SYSTEM = '''当前为回答阶段，只围绕用户这次要做的事回应，用简洁自然的中文。
 日程结果先说明真实冲突或调整原因，再说任务、具体日期（含星期）、实际时段和时长，最后一句请用户查看草案。
@@ -80,6 +81,7 @@ def create_run(db, conversation_id, payload):
             content={'run_id': run.id, 'attempt': 1, 'status': 'running', 'links': []})
         db.add(output); db.flush()
         run.payload = {**run.payload, 'assistant_message_id': output.id}
+        record_progress(run,output,'understanding')
         db.flush()
         if session.title_source == 'default':
             automatic_title(db, session, ' '.join(payload.text.split())[:28], session.version)
@@ -121,6 +123,7 @@ def update_output(engine, run_id, token, *, text='', mode=None, terminal=None, f
             run.payload = {**run.payload, 'delivery': mode}
         if text or mode:
             run.phase = 'generating'
+        record_progress(run,output,run.phase,terminal=terminal)
         if terminal:
             run.status = terminal; run.phase = 'finished'; run.error_code = failure
         output.content = {**output.content, 'status': run.status, **({'links': links} if links is not None else {})}
@@ -161,6 +164,7 @@ async def process(engine, run_id, token):
         # Flush real received chunks at most every ~80ms (or 128 characters).
         # No text is manufactured; final text is stored only in the message.
         stage='final_reply'
+        update_output(engine,run_id,token,mode='connecting')
         loop = asyncio.get_running_loop(); flushed = loop.time() - .08
         async with asyncio.timeout(245):
             async for event in reply_events(request):
@@ -226,6 +230,7 @@ def stop(db, conversation_id, run_id, attempt):
             run.status = 'cancelled'; run.phase = 'cancelled'
             output = db.get(AssistantMessage, run.payload['assistant_message_id'])
             output.content = {**output.content, 'status': 'cancelled'}
+            record_progress(run,output,terminal='cancelled')
         data = run_data(db, run)
     task = _tasks.get((db.get_bind(), run_id))
     if task and not task.done():
@@ -253,6 +258,7 @@ def retry(db, conversation_id, run_id, attempt):
         run.payload = {**run.payload, 'attempt': attempt + 1, 'retry_of': attempt,
             'assistant_message_id': output.id, 'token': uuid4().hex, 'delivery': 'connecting', 'provider_retry':None}
         run.status = 'running'; run.phase = 'understanding'; run.error_code = None
+        record_progress(run,output,'understanding')
         return run_data(db, run), True
 
 

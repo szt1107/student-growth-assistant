@@ -1,16 +1,17 @@
 import { Alert } from './ui/controls.js'
 import { Button, Input, Textarea, Label } from './ui/controls.js'
-import {useRef,useState} from 'react'
+import {useLayoutEffect,useRef,useState} from 'react'
 import { Popover } from 'radix-ui'
 import {apiTime} from './dayflow.js'
 import {saveCalendarChange} from '../api.js'
 
-export default function CalendarEditor({initial,revision,source,anchor,onClose,onSaved,onOpenTask,onManageRules}){
+export default function CalendarEditor({initial,revision,source,anchor,onClose,onSaved,onOpenTask,onManageRules,onPreview}){
  const [value,setValue]=useState(initial),[error,setError]=useState(''),[busy,setBusy]=useState(false),[deleting,setDeleting]=useState(false)
  const request=useRef(null),returnFocus=useRef(typeof document!=='undefined'?document.activeElement:null),saving=useRef(false)
  const readOnly=['deadline','goal','course_snapshot'].includes(source?.kind)
  const narrow=typeof window!=='undefined'&&window.innerWidth<768
  const virtualAnchor=useRef({getBoundingClientRect:()=>anchor||new DOMRect(window.innerWidth/2,120,0,0)})
+ useLayoutEffect(()=>{onPreview?.(value)},[value,onPreview])
  const update=patch=>{setValue(current=>({...current,...patch}));setError('');setDeleting(false);request.current=null}
  async function submit(action){
   if(saving.current)return

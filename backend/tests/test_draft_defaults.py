@@ -233,7 +233,9 @@ def test_short_eight_oclock_edit_keeps_evening_context_and_confirm_phrase_is_rea
 def test_failed_first_reply_does_not_drop_user_homework_context(client,defaults_chat,monkeypatch):
     async def broken(request):raise claude_client.AIServiceError('AI_UNAVAILABLE');yield
     monkeypatch.setattr(conversation_runs,'reply_events',broken)
-    assert send(client,defaults_chat,'我今天晚上要完成操作系统作业。','first')['status']=='failed'
+    # This turn deliberately requests discussion; the same statement without
+    # the opt-out now correctly produces a draft before the narration stage.
+    assert send(client,defaults_chat,'我今天晚上要完成操作系统作业，先不要安排。','first')['status']=='failed'
     ref=ref_of(send(client,defaults_chat,'大概一个半小时，你帮我安排一下。','second'))
     assert ref['content']['schedule']['title']=='操作系统作业' and ref['content']['schedule']['duration_minutes']==90
 
@@ -279,8 +281,8 @@ def test_past_fixed_start_is_not_silently_advanced(client, defaults_chat):
     draft = ref_of(send(client, defaults_chat, '今天必须9点开始整理笔记，60分钟，帮我安排'))
     assert draft['content']['schedule']['start_exact']
     assert draft['content']['schedule']['start_time'] == '09:00'
-    assert draft['status'] == 'conflict' and not draft['items']
-    assert any(problem['code'] == 'START_IN_PAST' for problem in draft['problems'])
+    assert draft['status'] == 'ready' and draft['calendar_record']
+    assert draft['items'][0]['start_at'] == '2026-10-14T09:00:00+08:00'
     assert call(client, '/api/tasks') == []
 
 

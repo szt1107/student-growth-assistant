@@ -50,6 +50,8 @@ def active_text(text):
 
 
 def _operation(text):
+    if re.search(r'(写入|存入|记入|记到|保存到|添加到|录入|存进|存到).{0,12}(档案|偏好)|(?:保存|记录).{0,8}(?:这个|我的)?(?:偏好|档案)', text):
+        return 'profile'
     natural = natural_operation(text)
     if natural:
         return natural
@@ -71,7 +73,15 @@ def _operation(text):
         return 'create_task'
     if re.search(r'(?:我|我们)(?:今天|明天|今晚|明晚|本周|下周)?(?:要|准备|打算|计划).{0,16}(?:写|读|学习|复习|背|整理|完成|练习)|(?:今天|明天|今晚|明晚|明早).{0,12}(?:早读|读书|复习|写作业|写报告|整理笔记)', text):
         return 'schedule'
+    if (re.search(r'(?:今天|明天|今晚|明晚|明早).{0,12}(?:写|读|学习|复习|整理|完成).{0,24}(?:作业|报告|演讲稿|论文|笔记|实验|ppt)',text,re.I)
+            and not re.search(r'怎么|如何|建议|思路|方法|解释|讨论|[？?]',text)):
+        return 'schedule'
     return None
+
+
+def detail_answer(text):
+    """Recognize slot values, without granting an action on their own."""
+    return bool(re.fullmatch(r'(大概|大约|预计|需要|要|今晚|今天|明天|本周|下周|凌晨|早晨|早上|上午|中午|下午|晚上|工作日|周末|每天|每日|每周|每次|星期|礼拜|周[一二三四五六日天]|分钟|小时|只在|仅在|固定|每个|是|就|都|个|半|到|至|和|及|、|[hHmMiInNsS]|\d|[零一二两三四五六七八九十点前完成：:，,。.\s\-–])+', text))
 
 
 def select_skills(text, history=(), current_drafts=(), *, mode=None):
@@ -83,6 +93,12 @@ def select_skills(text, history=(), current_drafts=(), *, mode=None):
     hypothetical = bool(re.search(r'^(如果|假如|假设|举例|比如)|(?:如果|假如|假设).*(会怎样|会怎么样|会如何|会不会|会否|是否可行|是否.{0,12}(冲突|影响))|(?:解释|分析).{0,8}(这句话|这段话)', current))
     readonly = bool(re.search(r'(只|仅)(想|要|是)?(查|看|问|了解)|看看|看一下|查一下|查询|最新任务|有什么|多少|在哪|忙不忙|是什么|记得', current))
     operation = _operation(current)
+    if operation=='profile' and not re.search(r'(生成|创建|新建|给我|整理成).{0,12}(草案|初稿)',current):
+        negative=negative or any(re.search(r'(不要|别|不用|不想|不需要|无需|不必|暂不|暂时不|先不|先别|不能|禁止).*(写入|存入|记到|记入|录入|保存|添加到|存进|存到|存档)',clause)
+            for clause in re.split(r'[，,。；;！？!?\n]',current))
+    if operation=='profile' and re.search(r'^(?:请问|我想知道|想了解)?(?:怎么|如何|为什么)',current):
+        operation=None
+        readonly=True
     if re.search(r'是什么意思|什么叫|怎么理解|会怎么处理', current):
         operation = None
         readonly = True
@@ -110,7 +126,7 @@ def select_skills(text, history=(), current_drafts=(), *, mode=None):
         return Selection(('query',) if readonly else ('chat',), 'query' if readonly else 'chat',
             READ_TOOLS if readonly else frozenset(), reason='negated_or_hypothetical')
     # "帮我看看今天任务" has no write authorization, unlike "看看并生成草案".
-    if readonly and not re.search(r'(生成|创建|新建|新增|修改|调整|规划|排程|整理为|排进|安排一下|帮我安排|拆解|帮我复盘)', current):
+    if readonly and not re.search(r'(生成|创建|新建|新增|修改|调整|规划|排程|整理为|排进|安排一下|帮我安排|拆解|帮我复盘|写入|存入|记入|记到|保存到|添加到|录入|存进|存到)', current):
         operation = 'query'
     if (operation is None and mode == 'plan'
         and re.search(r'作业|报告|论文|笔记|早读|读书|复习|[pP][pP][tT]', current)
@@ -129,7 +145,7 @@ def select_skills(text, history=(), current_drafts=(), *, mode=None):
                 if re.search(r'换个话题|不安排|先不要', item.get('text', '')):break
         operation = operation or 'schedule'
     inherited = False
-    if operation is None and re.fullmatch(r'(大概|大约|预计|需要|要|今晚|今天|明天|本周|下周|周[一二三四五六日天]|\d|[一二三四五六七八九十半个小时分钟点前完成：:，,。\s])+', current):
+    if operation is None and detail_answer(current):
         # Only short answers to an unresolved, same-conversation workflow inherit
         # intent. An assistant message can stop inheritance, but cannot grant it.
         for item in list(history)[-8:][::-1]:
@@ -139,7 +155,7 @@ def select_skills(text, history=(), current_drafts=(), *, mode=None):
                 prior = select_skills(item.get('text', ''))
                 if prior.expected:
                     operation = prior.operation; inherited = True; break
-                if prior.operation == 'chat' and re.search(r'换个话题|不安排|先不要', item.get('text', '')):
+                if prior.expected is None and not detail_answer(active_text(item.get('text',''))) and not re.fullmatch(r'(嗯+|好+|好的|可以|行)[，,。!！\s]*',item.get('text','')):
                     break
     operation = operation or ('query' if readonly else 'chat')
     names = ('task', 'schedule') if operation == 'create_task' or operation == 'schedule' and re.search(r'任务|作业|新建|创建', current) else (

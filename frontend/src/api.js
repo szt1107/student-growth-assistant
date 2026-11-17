@@ -1,6 +1,14 @@
 import { localizedError } from './localization.js'
 
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
+let accountIdentity = null
+export const setAccountIdentity = id => { accountIdentity = id }
+
+function checkAccountResponse(detail) {
+  if (['AUTH_REQUIRED', 'ACCOUNT_CHANGED'].includes(detail?.code) && typeof window !== 'undefined') {
+    window.location.replace('/login')
+  }
+}
 
 export function readableDetail(detail) {
   if (typeof detail === 'string') return detail
@@ -33,12 +41,15 @@ async function request(path, options = {}, timeoutMs = 15000) {
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
+      credentials: 'include',
       signal: controller.signal,
-      headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(accountIdentity && !path.startsWith('/api/auth/') ? { 'X-Account-Id': accountIdentity } : {}) },
     })
 
     const body = await response.json()
     if (!response.ok) {
+      checkAccountResponse(body?.detail)
       throw new ApiError(response.status, body?.detail)
     }
     return body
@@ -57,6 +68,11 @@ async function request(path, options = {}, timeoutMs = 15000) {
     clearTimeout(timeout)
   }
 }
+
+export const getAccountSession = () => request('/api/auth/session')
+export const registerAccount = data => request('/api/auth/register', { method: 'POST', body: JSON.stringify(data) })
+export const loginAccount = data => request('/api/auth/login', { method: 'POST', body: JSON.stringify(data) })
+export const logoutAccount = () => request('/api/auth/logout', { method: 'POST' })
 
 export const getTasks = () => request('/api/tasks')
 export async function ensureConversationRuntime(){
@@ -194,9 +210,13 @@ async function speechRequest(path, options) {
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
   const timer = setTimeout(() => controller.abort(), 135000)
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`, { ...options, signal })
+    const response = await fetch(`${API_BASE_URL}${path}`, { ...options, credentials: 'include', signal,
+      headers: { ...options.headers, ...(accountIdentity ? { 'X-Account-Id': accountIdentity } : {}) } })
     const body = await response.json()
-    if (!response.ok) throw Error(body.detail?.message || '语音服务暂不可用，请稍后重试。')
+    if (!response.ok) {
+      checkAccountResponse(body.detail)
+      throw Error(body.detail?.message || '语音服务暂不可用，请稍后重试。')
+    }
     return body
   } finally { clearTimeout(timer) }
 }
