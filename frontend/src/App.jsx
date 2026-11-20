@@ -6,7 +6,7 @@ import SchedulePage from './pages/SchedulePage.jsx'
 const ReviewPage=lazy(()=>import('./pages/GoalsGrowthPage.jsx'))
 const MyProfilePage=lazy(()=>import('./pages/MyProfilePage.jsx'))
 const TasksPage=lazy(()=>import('./pages/TasksPage.jsx'))
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './codex/ui/dialog.jsx'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './codex/ui/dialog.jsx'
 import WorkspaceShell from './components/WorkspaceShell.jsx'
 import ConversationManager from './components/ConversationManager.jsx'
 import WorkspaceDraft,{DraftPreview} from './components/WorkspaceDraft.jsx'
@@ -125,13 +125,13 @@ export default function App() {
       {resource?.conversationId&&<Button className="button subtle" onClick={()=>openConversation(resource.conversationId,resource.messageId)}>返回相关对话</Button>}{children}
     </WorkspaceShell>} />
     <Dialog open={Boolean(taskResource)} onOpenChange={open=>{if(!open&&!taskBusy)setTaskResource(null)}}>
-      <DialogContent drawer className="task-detail-drawer" onEscapeKeyDown={event=>{if(taskBusy)event.preventDefault()}} onCloseAutoFocus={event=>{
+      <DialogContent drawer className="task-detail-drawer" aria-describedby={undefined} onEscapeKeyDown={event=>{if(taskBusy)event.preventDefault()}} onCloseAutoFocus={event=>{
         event.preventDefault()
         const previous=taskReturnFocus.current
         if(previous?.isConnected&&!previous.closest('[hidden],[inert]'))previous.focus()
         else document.getElementById('v2-chat')?.focus()
       }}>
-        <DialogHeader><DialogTitle>任务详情</DialogTitle><DialogDescription>查看正式任务，编辑与执行反馈由你确认保存。</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>任务详情</DialogTitle></DialogHeader>
         {taskResource&&<Suspense fallback={<p role="status">正在读取任务详情…</p>}><TasksPage key={taskResource.id} taskId={taskResource.id} recoveryWorkspace={settings.workspace_id} refreshVersion={versions.tasks} onDataChanged={()=>dataChanged()} onAdjustTask={requestAdjustment} onPendingChange={setTaskBusy}/></Suspense>}
       </DialogContent>
     </Dialog></>}}</ConversationManager>

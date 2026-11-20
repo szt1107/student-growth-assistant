@@ -1,6 +1,7 @@
 import { Button } from '../codex/ui/controls.js'
 import ClockBadge from '../codex/ClockBadge.jsx'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../codex/ui/tooltip.jsx'
+import { LogOut } from 'lucide-react'
 import { cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState, Suspense } from 'react'
 import { defaultSplitRatio, renderedSplitRatio, splitBounds, toolPlacement, workbenchPanel, workbenchVisibility, workspacePages } from '../workbench.js'
 import { logoutAccount } from '../api.js'
@@ -20,6 +21,7 @@ export default function WorkspaceShell({ state, dispatch, chat, children, review
   const [auxiliaryTarget, setAuxiliaryTarget] = useState(null)
   const [signingOut, setSigningOut] = useState(false)
   const [logoutError, setLogoutError] = useState('')
+  const logoutLabel = signingOut ? '正在注销…' : '注销'
   const root = useRef(null), grid = useRef(null), lastFocus = useRef(null), drag = useRef(null)
   const panel = state.navigation === 'home' ? workbenchPanel(state) : 'collapsed'
   const visible = workbenchVisibility(state, narrow)
@@ -146,6 +148,14 @@ export default function WorkspaceShell({ state, dispatch, chat, children, review
           }
         }}><span className="v2-brand-symbol"><span className="v2-brand-label">生长</span><svg className="v2-brand-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M10 5v14"/></svg></span></Button></TooltipTrigger><TooltipContent side={narrow?'top':'right'}>{visible.conversations?'收起会话列表':'展开会话列表'}</TooltipContent></Tooltip>
         {['home', ...workspacePages].map(page => <Tooltip key={page}><TooltipTrigger asChild><Button className="v2-nav-icon size-10 min-h-10 max-lg:size-11 max-lg:min-h-11 rounded-lg p-0 [&_svg]:size-5" size="icon" type="button" aria-label={labels[page]} aria-current={state.navigation === page ? 'page' : undefined} onClick={() => navigate(page)}><svg viewBox="0 0 24 24" aria-hidden="true">{navigationIcons[page]}</svg></Button></TooltipTrigger><TooltipContent side={narrow?'top':'right'}>{labels[page]}</TooltipContent></Tooltip>)}
+        <div className="v2-session-actions">
+          <Tooltip><TooltipTrigger asChild>
+            <Button type="button" variant="secondary" size="icon" className="v2-logout size-10 min-h-10 rounded-full text-primary hover:bg-primary/15 max-lg:size-11 max-lg:min-h-11" aria-label={logoutLabel} disabled={signingOut} onClick={signOut}>
+              <LogOut aria-hidden="true" />
+            </Button>
+          </TooltipTrigger><TooltipContent side={narrow ? 'top' : 'right'}>{logoutLabel}</TooltipContent></Tooltip>
+          {logoutError && <p className="v2-logout-error" role="alert">{logoutError}</p>}
+        </div>
       </nav></TooltipProvider>
       <aside id="v2-conversations" className="v2-conversations" aria-label="会话区域" hidden={!visible.conversations} inert={!visible.conversations}>
         <div id="v2-conversation-content" hidden={!visible.conversations} inert={!visible.conversations}>
@@ -180,9 +190,5 @@ export default function WorkspaceShell({ state, dispatch, chat, children, review
         <div ref={setAuxiliaryTarget} hidden={Boolean(auxiliaryPreview&&previewPage===state.auxiliaryPage)} inert={Boolean(auxiliaryPreview&&previewPage===state.auxiliaryPage)}/>
       </div>
     </div>
-    <footer className="v2-session-actions">
-      {logoutError && <p className="v2-logout-error" role="alert">{logoutError}</p>}
-      <Button type="button" variant="outline" size="sm" className="v2-logout" disabled={signingOut} onClick={signOut}>{signingOut ? '正在注销…' : '注销'}</Button>
-    </footer>
   </div>
 }

@@ -79,35 +79,33 @@
  .review-range-toolbar>.review-date-navigation { grid-column:1 / -1;grid-row:2;justify-content:space-between }
 }
 
-.compact-shell.v2-shell .v2-session-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  min-height: 44px;
+.v2-session-actions {
+  position: relative;
+  flex-shrink: 0;
+  margin-block-start: auto;
+}
+
+.v2-logout-error {
+  position: absolute;
+  z-index: 10;
+  inset-inline-start: calc(100% + 8px);
+  inset-block-end: 0;
+  width: max-content;
+  max-width: min(240px, calc(100vw - 72px));
   box-sizing: border-box;
-  padding: 6px 16px calc(6px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--sga-border);
-  background: var(--sga-background);
-}
-
-.compact-shell.v2-shell .v2-logout.sga-button {
-  min-height: 32px;
-  padding: 5px 16px;
+  margin: 0;
+  padding: 8px 12px;
   border: 1px solid var(--sga-border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--sga-surface);
-  color: var(--sga-primary);
-  font-size: 13px;
-  font-weight: 400;
-  box-shadow: none;
+  color: #a63232;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
-
-.compact-shell.v2-shell .v2-logout.sga-button:hover { background: var(--sga-muted); }
-.v2-logout-error { margin: 0; color: #a63232; font-size: 12px; line-height: 1.6; }
 
 @media(max-width:1023px) {
-  .compact-shell.v2-shell .v2-logout.sga-button { min-height: 44px; }
-  .compact-shell.v2-shell .v2-navigation { padding-bottom: 4px; }
+  .compact-shell.v2-shell .v2-navigation { reading-flow: flex-visual; }
+  .v2-session-actions { order: -1; margin-block-start: 0; }
+  .v2-logout-error { inset-inline-start: 0; inset-block-end: calc(100% + 8px); }
 }

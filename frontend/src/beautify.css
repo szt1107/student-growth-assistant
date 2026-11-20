@@ -60,6 +60,7 @@ body { background: var(--sga-background); }
   box-shadow: inset 0 0 0 1px #cfdcc4, 0 3px 8px #39523109;
 }
 .compact-shell.v2-shell .v2-navigation .v2-nav-icon:hover { background: #e2e9d9; }
+.v2-navigation .v2-logout.sga-button { border-radius: 50%; }
 .compact-shell.v2-shell .v2-navigation .v2-brand-label {
   color: #34553f;
   font-family: var(--beauty-serif);

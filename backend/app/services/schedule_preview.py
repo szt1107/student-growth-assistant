@@ -5,6 +5,7 @@ deadline. Partial drafts cannot enter the original confirmation transaction.
 """
 from types import SimpleNamespace
 from datetime import datetime, time, timedelta
+import re
 from sqlalchemy import select
 from ..models import AssistantProposal, AssistantSession, AssistantMessage, AssistantRun, Task
 from ..workspace_schemas import SchedulePreview
@@ -356,14 +357,32 @@ def create(db, run, request, key, session_factory, *, base_ref=None, interpreted
     value,origins=draft_defaults.schedule(request,now,base=base,sources=sources,
         preferences=None if saved['is_sample'] else saved['settings'], interpreted_fields=interpreted_fields)
     independent=not base and draft_defaults.independent_schedule(request['message'],now)
-    matches=db.scalars(select(Task).where(Task.title==value.title,Task.task_kind=='executable')).all() if not value.task_id and not independent else []
+    from .ai_skills import active_text
+    current_text=active_text(request['message'])
+    references=set(re.findall(r'(?:任务\s*#\s*|task:\s*)([1-9]\d*)',current_text,re.I))
+    modifying=bool(re.search(r'调整|修改|更新|重排|重新安排|移动|挪|改到|安排|排程',current_text))
+    requested_id=None
+    if references and modifying and not independent and not re.search(r'新建|新增|另一个|参考|类似',current_text):
+        if len(references)>1:error('AMBIGUOUS_TASK','这份日程初稿包含多个任务编号，请选择具体任务后再调整。',422)
+        requested_id=int(next(iter(references)))
+        if base and requested_id!=value.task_id:error('INVALID_DRAFT','当前草案对应另一项任务，请先关闭或放弃它，再调整所选任务。',422)
+    if requested_id:
+        task=db.get(Task,requested_id)
+        if not task or task.task_kind!='executable':error('TASK_NOT_FOUND','所选任务已不存在或不是可执行任务。',404)
+        matches=[task]
+    else:
+        matches=db.scalars(select(Task).where(Task.title==value.title,Task.task_kind=='executable')).all() if not value.task_id and not independent else []
     if len(matches)>1:error('AMBIGUOUS_TASK','存在多个同名正式任务，请先在工作区选择具体任务。',422)
     if matches:
         task=matches[0]
         if task.status.value!='todo':error('TASK_UNAVAILABLE','同名任务已完成或取消，请明确选择或修改名称。',422)
         updates={'task_id':task.id}
+        current_values=draft_defaults.user_values(request['message'],now)
+        if requested_id and not base and not re.search(r'(?:名称|标题)(?:修改为|改为|改成|设为|设置为|[:：])|改名|重命名',current_text):
+            updates['title']=task.title;origins['title']='formal_task'
         for field,formal in [('deadline',task.deadline),('duration_minutes',task.duration_minutes),('priority',task.priority.value)]:
-            if origins.get(field) in ('unresolved','system_default'):updates[field]=formal;origins[field]='formal_task'
+            if (requested_id and not base and field not in current_values) or origins.get(field) in ('unresolved','system_default'):
+                updates[field]=formal;origins[field]='formal_task'
         value=value.model_copy(update=updates);origins['task_id']='formal_task'
     target=row.payload['actions'][0]['target'] if row else f'task:{value.task_id}' if value.task_id else f'draft:preview-{run.id}'
     calculation_session=session if row else SimpleNamespace(week_start=now.date()-timedelta(days=now.weekday()))

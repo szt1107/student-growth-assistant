@@ -138,13 +138,14 @@ test('unknown primary page, auxiliary page, size or mobile surface cannot corrup
 const {default:WorkspaceShell}=await loadJsx(new URL('../src/components/WorkspaceShell.jsx',import.meta.url))
 const renderShell = state => renderToStaticMarkup(React.createElement(WorkspaceShell, { state, dispatch: () => {}, conversationContent: 'REAL_CONVERSATION_LIST', chat: 'CHAT', review: 'REVIEW', profile: 'PROFILE', clock: '演示 · 2026-10-14 18:00 北京时间' }, 'SCHEDULE'))
 
-test('all workspace pages expose one logout button in the shared footer', () => {
+test('all workspace pages expose one accessible round logout button in navigation', () => {
   for (const navigation of ['home', 'schedule', 'review', 'profile']) {
     const html = renderShell({ ...initialWorkbench, navigation })
-    const footer = html.slice(html.indexOf('<footer class="v2-session-actions">'))
-    assert.match(footer, /<button[^>]*type="button"[^>]*>注销<\/button>/)
-    assert.equal((html.match(/>注销<\/button>/g) || []).length, 1)
-    assert.doesNotMatch(footer, /hidden=""|inert=""/)
+    const nav = html.match(/<nav class="v2-navigation".*?<\/nav>/s)?.[0] ?? ''
+    assert.match(nav, /<button[^>]*\brounded-full\b[^>]*type="button"[^>]*aria-label="注销"/)
+    assert.equal((html.match(/aria-label="注销"/g) || []).length, 1)
+    assert.doesNotMatch(html, /<footer\b[^>]*\bv2-session-actions\b/)
+    assert.doesNotMatch(nav, /hidden=""|inert=""/)
   }
 })
 
@@ -258,8 +259,8 @@ test('all pages share one clock in the workspace toolbar and one auxiliary toggl
 test('workspace navigation includes a brand sidebar toggle without a collapsed strip', () => {
   const html = renderShell(initialWorkbench)
   const navigation = html.match(/<nav class="v2-navigation".*?<\/nav>/s)[0]
-  assert.equal((navigation.match(/<svg /g) || []).length, 5)
-  assert.equal((navigation.match(/aria-hidden="true"/g) || []).length, 5)
+  assert.equal((navigation.match(/<svg /g) || []).length, 6)
+  assert.equal((navigation.match(/aria-hidden="true"/g) || []).length, 6)
   assert.match(navigation,/class="[^"]*\bv2-brand-toggle\b[^"]*"/)
   const collapsed=renderShell({...initialWorkbench,conversations:false})
   assert.match(collapsed,/--v2-list-width:0px/)
