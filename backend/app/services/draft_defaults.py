@@ -204,7 +204,7 @@ def user_values(text, now, *, reference_day=None):
         title_text = re.sub(r'^(?:任务名称|任务|名称|标题)[：:]\s*','',title_text)
         title_text = re.sub(r'^(?:我|请|你|帮我|今天|今晚|昨天|前天|明天|明晚|明早|凌晨|早晨|早上|晚上|上午|下午|还想|还要|还需要|另外|再帮我|要|想|打算|准备|计划|用来|用于|必须|务必|准时|固定|只能|开始|有个|有一个|需要|完成|写|安排一下|安排|排一下|排|创建|新建|把|将|给我|进行|参加|出席|举办|组织|做|一下|在|从|于|\s|：|:)+', '',title_text)
         title_text = re.split(r'预计|大概|大约|耗时|用时|持续|时长|请(?:你)?(?:帮我|给我)|帮我(?:安排|规划|生成)|开始|结束', title_text, maxsplit=1)[0]
-        match = re.search(r'([\u4e00-\u9fffA-Za-z0-9 ]{0,60}?(?:作业|实验报告|报告|实验|论文|考试|复习|项目|阅读|笔记|早读|读书|健身|训练|跑步|锻炼|游泳|瑜伽|散步|[pP][pP][tT]))',title_text)
+        match = re.search(r'([\u4e00-\u9fffA-Za-z0-9 ]{0,60}?(?:作业|实验报告|报告|实验|论文|考试|复习|项目|阅读|笔记|早读|读书|健身|训练|跑步|锻炼|游泳|瑜伽|散步|[pP][pP][tT])(?:的?(?:提纲|初稿|终稿|草稿|排版检查|排版|检查))?)',title_text)
         if match:
             values['title'] = match[1].strip(' “”“');break
         # Recover an explicitly named occasion without a whitelist of school tasks.

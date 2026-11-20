@@ -14,7 +14,12 @@ try {
             $command = Get-Command $candidate.Name -ErrorAction SilentlyContinue
             if (!$command) { continue }
             $prefixArgs = $candidate.Args
-            & $command.Source @prefixArgs -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>$null
+            try {
+                & $command.Source @prefixArgs -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>$null
+            } catch {
+                # Windows PowerShell can turn a failed launcher probe's stderr into an error.
+                continue
+            }
             if ($LASTEXITCODE -ne 0) { continue }
             & $command.Source @prefixArgs -m venv .venv
             if ($LASTEXITCODE -ne 0) { throw '创建 Python 虚拟环境失败。' }

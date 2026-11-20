@@ -301,6 +301,50 @@ def test_flexible_preview_replaces_an_existing_fixed_start(client, defaults_chat
     assert draft['items'] and all(item['end_at'][11:16] <= '12:00' for item in draft['items'])
 
 
+@pytest.mark.parametrize('title', ['软件工程报告提纲', '软件工程报告初稿', '软件工程报告排版检查'])
+def test_report_step_titles_remain_complete(title):
+    now=datetime.fromisoformat('2026-10-14T18:00:00+08:00')
+    assert draft_defaults.user_values(f'明晚安排{title}，40分钟',now)['title']==title
+
+
+def test_explicit_task_number_replans_original_task_after_course_conflict(client, defaults_chat, test_engine):
+    from sqlalchemy.orm import Session
+    from app.models import TaskSchedulingProfile
+
+    task=call(client,'/api/tasks',{'title':'软件工程报告提纲','duration_minutes':40,
+        'priority':'high','deadline':'2026-10-16T18:00:00+08:00'})
+    with Session(test_engine) as db:
+        db.add(TaskSchedulingProfile(task_id=task['id'],settings={
+            'fixed_start':'2026-10-15T19:15:00+08:00',
+            'allowed_windows':[{'start_at':'2026-10-15T19:15:00+08:00','end_at':'2026-10-15T19:55:00+08:00'}]}))
+        db.commit()
+    call(client,'/api/time-rules',{'title':'临时补课','kind':'course','recurrence':'once',
+        'date':'2026-10-15','start_time':'19:00','end_time':'20:00'})
+    call(client,'/api/time-rules',{'title':'晚间自习','kind':'protected','recurrence':'once',
+        'date':'2026-10-15','start_time':'21:00','end_time':'22:00'})
+    draft=ref_of(send(client,defaults_chat,f"请调整任务 #{task['id']}（软件工程报告提纲）的安排，周四晚上，原安排可以移动，取消固定开始时间，先生成草案。"))
+    value=draft['content']['schedule']
+    assert value['task_id']==task['id'] and value['title']==task['title']
+    assert value['duration_minutes']==40 and value['priority']=='high'
+    assert datetime.fromisoformat(value['deadline'])==datetime.fromisoformat('2026-10-16T18:00:00+08:00')
+    assert draft['status']=='ready'
+    item=next(item for item in draft['items'] if item['ref']==f"task:{task['id']}")
+    assert item['start_at']=='2026-10-15T20:00:00+08:00'
+    assert item['end_at']=='2026-10-15T20:40:00+08:00'
+    assert len(call(client,'/api/tasks'))==1
+    saved=call(client,f"/api/workspace/drafts/planning/{draft['id']}/confirm",{'expected_version':draft['version']})
+    assert saved['status']=='applied'
+    assert [(row['id'],row['title']) for row in call(client,'/api/tasks')]==[(task['id'],task['title'])]
+
+
+def test_unknown_explicit_task_number_does_not_fall_back_to_same_title(client,defaults_chat):
+    task=call(client,'/api/tasks',{'title':'软件工程报告提纲','duration_minutes':40,
+        'deadline':'2026-10-16T18:00:00+08:00'})
+    result=send(client,defaults_chat,'请调整任务 #999（软件工程报告提纲）的安排，周四晚上，先生成草案。')
+    assert any(item.get('error')=='TASK_NOT_FOUND' for item in result['content']['tools'])
+    assert [row['id'] for row in call(client,'/api/tasks')]==[task['id']]
+
+
 def test_manual_segments_require_an_explicit_period_override(client, defaults_chat):
     draft = ref_of(send(client, defaults_chat, '周四上午整理笔记80分钟，可以分两段，帮我安排'))
     content = draft['content']
